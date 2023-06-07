@@ -1,12 +1,22 @@
-# Try to find Mesa off-screen library and include dir. Once done this will define
 #
-# OSMesa_FOUND        - true if OSMesa has been found OSMesa_INCLUDE_DIRS - where the GL/osmesa.h can be found OSMesa_LIBRARIES    - Link this to use OSMesa
-# OSMesa_VERSION      - Version of OSMesa found OSMesa::OSMesa      - Imported target
+# Copyright (C) 2023  Autodesk, Inc. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+# Find the off-screen rendering Mesa (OSMesa) headers and libraries.
+#
+# Once done this will define:
+# OSMesa_FOUND        - true if OSMesa has been found 
+# OSMesa_VERSION      - Version of OSMesa found 
+# OSMesa::OSMesa      - Imported target
+#
+# Note: Set OSMESA_ROOT to specify an additional directory to search.
 
 FIND_PATH(
   OSMESA_INCLUDE_DIR
   NAMES GL/osmesa.h
-  PATHS "${OSMESA_ROOT}/include" "$ENV{OSMESA_ROOT}/include" /usr/openwin/share/include /opt/graphics/OpenGL/include
+  PATHS "${OSMESA_ROOT}/include" "$ENV{OSMESA_ROOT}/include"
   DOC "OSMesa include directory"
 )
 MARK_AS_ADVANCED(OSMESA_INCLUDE_DIR)
@@ -14,7 +24,7 @@ MARK_AS_ADVANCED(OSMESA_INCLUDE_DIR)
 FIND_LIBRARY(
   OSMESA_LIBRARY
   NAMES OSMesa OSMesa16 OSMesa32
-  PATHS "${OSMESA_ROOT}/lib" "$ENV{OSMESA_ROOT}/lib" /opt/graphics/OpenGL/lib /usr/openwin/lib
+  PATHS "${OSMESA_ROOT}/lib" "$ENV{OSMESA_ROOT}/lib"
   DOC "OSMesa library"
 )
 MARK_AS_ADVANCED(OSMESA_LIBRARY)
@@ -55,13 +65,6 @@ FIND_PACKAGE_HANDLE_STANDARD_ARGS(
 )
 
 IF(OSMesa_FOUND)
-  SET(OSMesa_INCLUDE_DIRS
-      "${OSMESA_INCLUDE_DIR}"
-  )
-  SET(OSMesa_LIBRARIES
-      "${OSMESA_LIBRARY}"
-  )
-
   IF(NOT TARGET OSMesa::OSMesa)
     ADD_LIBRARY(OSMesa::OSMesa UNKNOWN IMPORTED)
     SET_TARGET_PROPERTIES(

@@ -63,7 +63,7 @@ TARGET_LINK_LIBRARIES(
 IF(RV_TARGET_LINUX)
   FIND_LIBRARY(
     MESAGL_LIBRARY
-    NAMES GLX_mesa
+    NAMES libGLX_mesa.so.0
     PATHS /usr/lib64 /usr/lib
     DOC "MesaGL library"
   )
