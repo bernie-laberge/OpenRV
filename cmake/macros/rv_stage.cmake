@@ -31,6 +31,7 @@ ADD_CUSTOM_TARGET(installed_movie_formats)
 ADD_CUSTOM_TARGET(image_formats)
 ADD_CUSTOM_TARGET(installed_image_formats)
 ADD_CUSTOM_TARGET(oiio_plugins)
+ADD_CUSTOM_TARGET(output_plugins)
 
 FUNCTION(rv_stage)
   SET(flags
@@ -539,6 +540,35 @@ FUNCTION(rv_stage)
 
     ADD_SHARED_LIBRARY_LIST(${arg_TARGET})
 
+  ELSEIF(${arg_TYPE} STREQUAL "OUTPUT_PLUGIN")
+    GET_TARGET_PROPERTY(_native_target_type ${arg_TARGET} TYPE)
+    IF(NOT _native_target_type STREQUAL "SHARED_LIBRARY")
+      MESSAGE(FATAL_ERROR "\"${arg_TARGET}\" ${arg_TYPE} should be a SHARED_LIBRARY, not a ${_native_target_type}")
+    ENDIF()
+    SET_TARGET_PROPERTIES(
+      ${arg_TARGET}
+      PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${RV_STAGE_PLUGINS_OUTPUT_DIR}"
+                 PREFIX ""
+                 C_VISIBILITY_PRESET default
+                 CXX_VISIBILITY_PRESET default
+    )
+    IF(RV_TARGET_WINDOWS)
+      FOREACH(
+        OUTPUTCONFIG
+        ${CMAKE_CONFIGURATION_TYPES}
+      )
+        STRING(TOUPPER ${OUTPUTCONFIG} OUTPUTCONFIG)
+        SET_TARGET_PROPERTIES(
+          ${arg_TARGET}
+          PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${OUTPUTCONFIG} "${RV_STAGE_PLUGINS_OUTPUT_DIR}"
+        )
+      ENDFOREACH()
+    ENDIF()
+
+    ADD_DEPENDENCIES(output_plugins ${arg_TARGET})
+
+    ADD_SHARED_LIBRARY_LIST(${arg_TARGET})
+
   ELSEIF(${arg_TYPE} STREQUAL "EXECUTABLE")
     GET_TARGET_PROPERTY(_native_target_type ${arg_TARGET} TYPE)
     IF(NOT _native_target_type STREQUAL "EXECUTABLE")
@@ -607,6 +637,7 @@ FUNCTION(rv_stage)
       movie_formats
       image_formats
       oiio_plugins
+      output_plugins
       dependencies
     )
 
@@ -652,6 +683,7 @@ FUNCTION(rv_stage)
       image_formats
       installed_image_formats
       oiio_plugins
+      output_plugins
       shared_libraries
       executables
       executables_with_plugins
