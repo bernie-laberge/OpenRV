@@ -153,12 +153,19 @@ ENDIF()
 
 RV_STAGE(TYPE "MAIN_EXECUTABLE" TARGET ${_target})
 
-# Install symbolication helper scripts (macOS and Linux only, not Windows)
-IF(NOT RV_TARGET_WINDOWS
-   AND RV_DEPS_BREAKPAD_VERSION
-)
+# Install symbolication helper scripts (Linux only — macOS is handled in nsapps/RV/CMakeLists.txt)
+IF(RV_TARGET_LINUX)
   CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/symbolicate_crash.sh ${RV_STAGE_BIN_DIR}/symbolicate_crash.sh COPYONLY)
-  IF(RV_TARGET_DARWIN)
-    CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/locate_crash_source.sh ${RV_STAGE_BIN_DIR}/locate_crash_source.sh COPYONLY)
-  ENDIF()
+  FILE(
+    COPY ${CMAKE_CURRENT_SOURCE_DIR}/crashpad_handler_linux.sh
+    DESTINATION ${RV_STAGE_BIN_DIR}
+    FILE_PERMISSIONS
+      OWNER_READ
+      OWNER_WRITE
+      OWNER_EXECUTE
+      GROUP_READ
+      GROUP_EXECUTE
+      WORLD_READ
+      WORLD_EXECUTE
+  )
 ENDIF()

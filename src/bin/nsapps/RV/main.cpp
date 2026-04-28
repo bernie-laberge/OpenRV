@@ -579,7 +579,7 @@ int main(int argc, char* argv[])
     //
     {
         TwkUtil::CrashHandler& crashHandler = TwkUtil::CrashHandler::instance();
-        QString handlerPath = QCoreApplication::applicationDirPath() + "/../MacOS/crashpad_handler";
+        QString handlerPath = QCoreApplication::applicationDirPath() + "/../MacOS/crashpad_handler_macos.sh";
 
         ostringstream versionStr;
         versionStr << MAJOR_VERSION << "." << MINOR_VERSION << "." << REVISION_NUMBER;

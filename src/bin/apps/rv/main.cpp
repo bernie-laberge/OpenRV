@@ -608,7 +608,7 @@ int utf8Main(int argc, char* argv[])
         handlerPath = QCoreApplication::applicationDirPath() + "/crashpad_handler.exe";
         string platformName = "Windows";
 #elif defined(PLATFORM_LINUX)
-        handlerPath = QCoreApplication::applicationDirPath() + "/crashpad_handler";
+        handlerPath = QCoreApplication::applicationDirPath() + "/crashpad_handler_linux.sh";
         string platformName = "Linux";
 #else
         handlerPath = QCoreApplication::applicationDirPath() + "/crashpad_handler";
