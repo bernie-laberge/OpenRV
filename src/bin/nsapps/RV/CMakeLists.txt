@@ -105,7 +105,6 @@ IF(RV_DEPS_BREAKPAD_VERSION)
       ${PROJECT_SOURCE_DIR}/src/bin/apps/rv
   )
   CONFIGURE_FILE(${_scripts_src}/symbolicate_crash.sh ${RV_STAGE_BIN_DIR}/symbolicate_crash.sh COPYONLY)
-  CONFIGURE_FILE(${_scripts_src}/locate_crash_source.sh ${RV_STAGE_BIN_DIR}/locate_crash_source.sh COPYONLY)
   CONFIGURE_FILE(${_scripts_src}/crashpad_handler_macos.sh.in ${CMAKE_CURRENT_BINARY_DIR}/crashpad_handler_macos.sh @ONLY)
   FILE(
     COPY ${CMAKE_CURRENT_BINARY_DIR}/crashpad_handler_macos.sh
