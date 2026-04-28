@@ -67,7 +67,7 @@ FUNCTION(RV_GENERATE_SYMBOLS)
     TARGET ${arg_TARGET}
     POST_BUILD
     COMMENT "Generating Breakpad symbols for ${arg_TARGET}"
-    COMMAND sh -c "${RV_STAGE_BIN_DIR}/dump_syms \"$1\" > \"$2\"" -- $<TARGET_FILE:${arg_TARGET}> ${_sym_file} DEPENDS ${RV_STAGE_BIN_DIR}/dump_syms
+    COMMAND sh -c "${RV_STAGE_BIN_DIR}/dump_syms \"$1\" > \"$2\"" -- $<TARGET_FILE:${arg_TARGET}> ${_sym_file}
     VERBATIM
   )
 
@@ -76,7 +76,7 @@ FUNCTION(RV_GENERATE_SYMBOLS)
     TARGET ${arg_TARGET}
     POST_BUILD
     COMMENT "Organizing Breakpad symbols for ${arg_TARGET}"
-    COMMAND bash ${_organize_script} ${_sym_file} ${_symbols_dir} DEPENDS ${_sym_file}
+    COMMAND bash ${_organize_script} ${_sym_file} ${_symbols_dir}
     VERBATIM
   )
 ENDFUNCTION()
