@@ -1,14 +1,19 @@
 #!/bin/sh
-# Thin wrapper around crashpad_handler that redirects its stderr to a log file.
+# Thin wrapper around crashpad_handler that:
+#   1. Redirects stderr to a log file to keep the terminal clean.
+#   2. Applies a CPU-time limit (ulimit -t) to guard against a known
+#      crashpad_handler infinite loop on Linux where it repeatedly fails to
+#      read certain memory mappings (VDSO, anonymous regions).
 #
-# On Linux, Crashpad logs benign ELF-reader diagnostics ("tag not found",
-# "read out of range") for every VDSO / anonymous mapping it inspects when
-# generating a crash dump.  These messages are harmless but flood the
-# terminal.  Redirecting stderr here keeps the terminal clean without losing
-# the information — the log file is placed next to the crash dumps so it
-# is available for debugging when needed.
+# Why ulimit -t works here:
+#   An idle crashpad_handler spends nearly all its time blocked waiting for
+#   a crash notification, accumulating negligible CPU time.  A handler stuck
+#   in a tight read loop burns CPU continuously and hits the 30-second limit
+#   in ~30 wall-clock seconds.  SIGXCPU then kills it, which closes the socket
+#   RV is waiting on and allows RV to exit cleanly instead of freezing forever.
 #
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="${RV_CRASH_DUMPS_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/RV/Crashes}"
 mkdir -p "$LOG_DIR"
+ulimit -t 30
 exec "${SCRIPT_DIR}/crashpad_handler" "$@" 2>>"${LOG_DIR}/crashpad_handler.log"
