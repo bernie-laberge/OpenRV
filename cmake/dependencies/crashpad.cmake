@@ -82,11 +82,22 @@ IF(RV_TARGET_DARWIN)
   LIST(APPEND _configure_options "-DCMAKE_C_FLAGS=-Wno-error=deprecated-declarations -Wno-deprecated-declarations")
 ENDIF()
 
+# third_party/lss (Linux Syscall Support) is only used on Linux
+IF(RV_TARGET_LINUX)
+  SET(_crashpad_submodules
+      "third_party/mini_chromium" "third_party/lss"
+  )
+ELSE()
+  SET(_crashpad_submodules
+      "third_party/mini_chromium"
+  )
+ENDIF()
+
 EXTERNALPROJECT_ADD(
   ${_target}
   GIT_REPOSITORY "https://github.com/getsentry/crashpad.git"
   GIT_TAG ${_version}
-  GIT_SUBMODULES "third_party/mini_chromium"
+  GIT_SUBMODULES ${_crashpad_submodules}
   GIT_SHALLOW FALSE
   GIT_PROGRESS TRUE
   UPDATE_DISCONNECTED TRUE
