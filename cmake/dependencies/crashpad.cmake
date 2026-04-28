@@ -87,7 +87,7 @@ EXTERNALPROJECT_ADD(
   GIT_REPOSITORY "https://github.com/getsentry/crashpad.git"
   GIT_TAG ${_version}
   GIT_SUBMODULES "third_party/mini_chromium"
-  GIT_SHALLOW TRUE
+  GIT_SHALLOW FALSE
   GIT_PROGRESS TRUE
   UPDATE_DISCONNECTED TRUE
   SOURCE_DIR ${_source_dir}
