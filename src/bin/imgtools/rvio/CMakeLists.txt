@@ -97,8 +97,6 @@ IF(RVIO_THIRD_PARTY_CUSTOMIZATION)
   )
 ENDIF()
 
-RV_STAGE(TYPE "EXECUTABLE_WITH_PLUGINS" TARGET ${_target})
-
 # Generate PDB debug symbols on Windows (for crash dump symbolication)
 IF(RV_TARGET_WINDOWS)
   TARGET_COMPILE_OPTIONS(
@@ -113,5 +111,8 @@ IF(RV_TARGET_DARWIN)
   TARGET_LINK_OPTIONS(${_target} PRIVATE "-Wl,-source_version,${RV_MAJOR_VERSION}.${RV_MINOR_VERSION}.${RV_REVISION_NUMBER}")
 ENDIF()
 
-# Generate Breakpad symbols for crash dump symbolication (macOS and Linux)
+# Generate Breakpad symbols before RV_STAGE so dump_syms runs on the actual binary — on Linux, RV_STAGE renames rvio to rvio.bin and replaces it with a shell
+# wrapper, so any POST_BUILD added after RV_STAGE would see the wrapper.
 RV_GENERATE_SYMBOLS(TARGET ${_target})
+
+RV_STAGE(TYPE "EXECUTABLE_WITH_PLUGINS" TARGET ${_target})
