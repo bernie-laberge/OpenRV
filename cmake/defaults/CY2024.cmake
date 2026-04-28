@@ -21,14 +21,6 @@ IF(RV_VFX_PLATFORM STREQUAL "CY2024")
       "f7050f554a65f6a42ece221eaeec1660"
   )
 
-  # Breakpad - Crash dump symbolication tools
-  SET(RV_DEPS_BREAKPAD_VERSION
-      "v2024.02.16"
-  )
-  SET(RV_DEPS_BREAKPAD_DOWNLOAD_HASH
-      "ae8c55b23c157771922b5ddca3803055"
-  )
-
   # Imath Can find the build version in OpenRV/_build/RV_DEPS_IMATH/install/lib/
   SET(RV_DEPS_IMATH_VERSION
       "3.1.12"

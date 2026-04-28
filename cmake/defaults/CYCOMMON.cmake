@@ -14,6 +14,14 @@ SET(RV_DEPS_ATOMIC_OPS_DOWNLOAD_HASH
     "cc7fad1e71b3064abe1ea821ae9a9a6e"
 )
 
+# breakpad https://github.com/google/breakpad
+SET(RV_DEPS_BREAKPAD_VERSION
+    "v2024.02.16"
+)
+SET(RV_DEPS_BREAKPAD_DOWNLOAD_HASH
+    "ae8c55b23c157771922b5ddca3803055"
+)
+
 # dav1d https://github.com/videolan/dav1d
 SET(RV_DEPS_DAV1D_VERSION
     "1.4.3"

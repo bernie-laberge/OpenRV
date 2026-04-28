@@ -44,7 +44,7 @@ FUNCTION(RV_GENERATE_SYMBOLS)
       ${CMAKE_CURRENT_BINARY_DIR}/${arg_TARGET}.sym
   )
   SET(_organize_script
-      ${PROJECT_SOURCE_DIR}/src/bin/nsapps/RV/organize_symbols.sh
+      ${PROJECT_SOURCE_DIR}/src/bin/apps/rv/organize_symbols.sh
   )
 
   # Ensure Breakpad tools are built before generating symbols

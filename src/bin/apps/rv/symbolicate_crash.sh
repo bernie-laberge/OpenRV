@@ -17,7 +17,13 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # Paths
 MINIDUMP_STACKWALK="${SCRIPT_DIR}/minidump_stackwalk"
 # Breakpad symbols directory (symbols/MODULE_NAME/MODULE_ID/)
-SYMBOLS_DIR="${SCRIPT_DIR}/../../../symbols"
+# On macOS the script lives inside RV.app/Contents/MacOS/ (3 levels deep);
+# on Linux it lives directly in bin/ (1 level deep).
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    SYMBOLS_DIR="${SCRIPT_DIR}/../../../symbols"
+else
+    SYMBOLS_DIR="${SCRIPT_DIR}/../symbols"
+fi
 
 # Check arguments
 if [ $# -lt 1 ]; then
