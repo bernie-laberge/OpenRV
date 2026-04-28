@@ -178,7 +178,7 @@ namespace IPCore
                 m_fb->staticRef();
             }
 
-            if (m_fb && (m_fb->width() != w || m_fb->height() != h))
+            if (m_fb->width() != w || m_fb->height() != h)
             {
                 m_fb->restructure(w, h, 0, 4);
             }

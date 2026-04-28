@@ -3635,6 +3635,8 @@ global let enterFrame = startTextEntryMode(\: (string;) {"Go To Frame: ";}, goto
     setCacheMode (mode);
 
     sendInternalEvent ("session-clear-everything", "", "rvui");
+
+    crash(); //!!!TBR
 }
 
 

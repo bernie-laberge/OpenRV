@@ -71,6 +71,7 @@
 #include <TwkUtil/FourCC.h>
 #include <TwkUtil/ThreadName.h>
 #include <TwkUtil/MemPool.h>
+#include <TwkUtil/CrashHandler.h>
 #include <TwkGLF/GLPixelBufferObjectPool.h>
 #include <arg.h>
 #include <fstream>
@@ -593,6 +594,42 @@ int utf8Main(int argc, char* argv[])
     //
 
     QApplication* app = new QApplication(argc, argv);
+
+    //
+    // Initialize crash handler early to catch crashes during startup
+    // (Must be after QApplication is created to use QCoreApplication::applicationDirPath)
+    //
+    {
+        TwkUtil::CrashHandler& crashHandler = TwkUtil::CrashHandler::instance();
+
+        // Determine platform-specific handler path
+        QString handlerPath;
+#ifdef PLATFORM_WINDOWS
+        handlerPath = QCoreApplication::applicationDirPath() + "/crashpad_handler.exe";
+        string platformName = "Windows";
+#elif defined(PLATFORM_LINUX)
+        handlerPath = QCoreApplication::applicationDirPath() + "/crashpad_handler";
+        string platformName = "Linux";
+#else
+        handlerPath = QCoreApplication::applicationDirPath() + "/crashpad_handler";
+        string platformName = "Unknown";
+#endif
+
+        ostringstream versionStr;
+        versionStr << MAJOR_VERSION << "." << MINOR_VERSION << "." << REVISION_NUMBER;
+
+        bool initialized = crashHandler.initialize("RV", versionStr.str(), handlerPath.toStdString());
+
+        if (initialized)
+        {
+            crashHandler.addAnnotation("platform", platformName);
+            crashHandler.addAnnotation("qt_version", QT_VERSION_STR);
+
+            // Automatically enable Mu debugging to include script source information in crash dumps
+            TwkApp::setDebugging(true);
+            std::cout << "INFO: Automatically enabled -debug mu for crash dumps" << std::endl;
+        }
+    }
 
     QTranslator* translator = new QTranslator();
     QLocale locale = QLocale(getenv("ORIGINALLOCAL"));

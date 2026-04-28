@@ -64,6 +64,7 @@ IF(NOT RV_VFX_CY2023)
 ENDIF()
 LIST(APPEND _configure_options "-DUSE_FREETYPE=0")
 LIST(APPEND _configure_options "-DUSE_GIF=OFF")
+LIST(APPEND _configure_options "-DUSE_JXL=OFF")
 
 LIST(APPEND _configure_options "-DBoost_ROOT=${RV_DEPS_BOOST_ROOT_DIR}")
 LIST(APPEND _configure_options "-DOpenEXR_ROOT=${RV_DEPS_OPENEXR_ROOT_DIR}")

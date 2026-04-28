@@ -47,6 +47,7 @@
 #include <TwkUtil/SystemInfo.h>
 #include <TwkUtil/ThreadName.h>
 #include <TwkUtil/MemPool.h>
+#include <TwkUtil/CrashHandler.h>
 #include <arg.h>
 #include <fstream>
 #include <iostream>
@@ -571,6 +572,30 @@ int main(int argc, char* argv[])
 
     // remove handler
     qInstallMessageHandler(nullptr);
+
+    //
+    // Initialize crash handler early to catch crashes during startup
+    // (Must be after QApplication is created to use QCoreApplication::applicationDirPath)
+    //
+    {
+        TwkUtil::CrashHandler& crashHandler = TwkUtil::CrashHandler::instance();
+        QString handlerPath = QCoreApplication::applicationDirPath() + "/../MacOS/crashpad_handler";
+
+        ostringstream versionStr;
+        versionStr << MAJOR_VERSION << "." << MINOR_VERSION << "." << REVISION_NUMBER;
+
+        bool initialized = crashHandler.initialize("RV", versionStr.str(), handlerPath.toStdString());
+
+        if (initialized)
+        {
+            crashHandler.addAnnotation("platform", "macOS");
+            crashHandler.addAnnotation("qt_version", QT_VERSION_STR);
+
+            // Automatically enable Mu debugging to include script source information in crash dumps
+            TwkApp::setDebugging(true);
+            std::cout << "INFO: Automatically enabled -debug mu for crash dumps" << std::endl;
+        }
+    }
 
     QTranslator* translator = new QTranslator();
     QLocale locale = QLocale(getenv("ORIGINALLOCAL"));

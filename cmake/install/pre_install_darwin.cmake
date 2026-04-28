@@ -5,15 +5,7 @@
 #
 
 FUNCTION(before_copy_platform FILE_PATH RET_VAL)
-  IF(FILE_PATH MATCHES "\\.dSYM")
-    IF(CMAKE_INSTALL_CONFIG_NAME MATCHES "^Release$")
-      SET(${RET_VAL}
-          "NO"
-          PARENT_SCOPE
-      )
-      RETURN()
-    ENDIF()
-  ENDIF()
+  # IF(FILE_PATH MATCHES "\\.dSYM") IF(CMAKE_INSTALL_CONFIG_NAME MATCHES "^Release$") SET(${RET_VAL} "NO" PARENT_SCOPE ) RETURN() ENDIF() ENDIF()
 
   IF(FILE_PATH MATCHES "\\.DS_Store")
     SET(${RET_VAL}

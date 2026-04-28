@@ -65,6 +65,7 @@
 #include <TwkUtil/sgcHop.h>
 #include <TwkUtil/sgcHopTools.h>
 #include <TwkUtil/Timer.h>
+#include <TwkUtil/CrashHandler.h>
 #include <TwkDeploy/Deploy.h>
 
 #include <IPMu/RemoteRvCommand.h>
@@ -5218,6 +5219,59 @@ namespace IPMu
     // Note: DO NOT DOCUMENT in commands.mud
     NODE_IMPLEMENTATION(crash, void)
     {
+        // Get backtrace to find the calling Mu script
+        Mu::Thread::BackTrace backtrace;
+        NODE_THREAD.backtrace(backtrace);
+
+        // Add Mu script file location to crash report
+        if (!backtrace.empty())
+        {
+            // Find the first frame with a valid symbol (skip the crash() function itself)
+            for (size_t i = 0; i < backtrace.size(); ++i)
+            {
+                if (backtrace[i].symbol)
+                {
+                    const Mu::Symbol* symbol = backtrace[i].symbol;
+
+                    // Try to get filename from backtrace first (most reliable when debugging is enabled)
+                    std::string scriptFile;
+                    if (backtrace[i].filename && backtrace[i].filename[0] != '\0')
+                    {
+                        scriptFile = backtrace[i].filename;
+                    }
+                    else
+                    {
+                        // Fall back to module location if backtrace doesn't have filename
+                        if (const Mu::Module* module = symbol->globalModule())
+                        {
+                            const Mu::String& location = module->location();
+                            if (!location.empty())
+                            {
+                                scriptFile = location.c_str();
+                            }
+                        }
+                    }
+
+                    // Add annotations if we found a script file
+                    if (!scriptFile.empty())
+                    {
+                        TwkUtil::CrashHandler::instance().addAnnotation("mu_script_file", scriptFile);
+
+                        // Add line number if available from backtrace
+                        if (backtrace[i].linenum > 0)
+                        {
+                            TwkUtil::CrashHandler::instance().addAnnotation("mu_script_line", std::to_string(backtrace[i].linenum));
+                        }
+
+                        // Add the function name
+                        TwkUtil::CrashHandler::instance().addAnnotation("mu_function", std::string(symbol->fullyQualifiedName().c_str()));
+
+                        break;
+                    }
+                }
+            }
+        }
+
         volatile int* a = (int*)(NULL);
         *a = 1;
     }

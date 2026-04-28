@@ -20,6 +20,7 @@
 #include <TwkPython/PyLockObject.h>
 #include <Python.h>
 #include <TwkUtil/File.h>
+#include <TwkUtil/CrashHandler.h>
 
 #include <QByteArray>
 // TODO_QT: Remove if everything works.
@@ -248,6 +249,38 @@ namespace TwkApp
         PyRun_SimpleString(text);
     }
 
+    //
+    //  Python trace function to capture execution context for crash dumps
+    //
+    static int pythonTraceFunction(PyObject* obj, PyFrameObject* frame, int what, PyObject* arg)
+    {
+        // Only update on line events (not call/return/exception)
+        if (what == PyTrace_LINE && TwkUtil::CrashHandler::instance().isInitialized())
+        {
+            PyCodeObject* code = PyFrame_GetCode(frame);
+            if (code)
+            {
+                const char* filename = PyUnicode_AsUTF8(code->co_filename);
+                const char* funcname = PyUnicode_AsUTF8(code->co_name);
+                int lineno = PyFrame_GetLineNumber(frame);
+
+                if (filename)
+                {
+                    TwkUtil::CrashHandler::instance().addAnnotation("py_script_file", std::string(filename));
+                    TwkUtil::CrashHandler::instance().addAnnotation("py_script_line", std::to_string(lineno));
+                }
+
+                if (funcname)
+                {
+                    TwkUtil::CrashHandler::instance().addAnnotation("py_function", std::string(funcname));
+                }
+
+                Py_DECREF(code);
+            }
+        }
+        return 0;
+    }
+
     void initPython(int argc, char** argv)
     {
         // PreInitialize Python
@@ -306,6 +339,14 @@ namespace TwkApp
                    "    multiprocessing.set_executable(python_exe)\n"
                    "    break\n"
                    "");
+
+        //
+        //  Install Python trace function for crash dump context
+        //
+        {
+            PyLockObject locker;
+            PyEval_SetTrace(pythonTraceFunction, NULL);
+        }
     }
 
     void finalizePython()

@@ -67,6 +67,7 @@
 #include <TwkUtil/Daemon.h>
 #include <TwkUtil/File.h>
 #include <TwkUtil/ThreadName.h>
+#include <TwkUtil/CrashHandler.h>
 #include <TwkQtBase/QtUtil.h>
 #include <RvApp/RvSession.h>
 #include <RvApp/FormatIPNode.h>
@@ -1018,6 +1019,35 @@ int utf8Main(int argc, char* argv[])
     TwkApp::QTBundle bundle("rv", MAJOR_VERSION, MINOR_VERSION, REVISION_NUMBER);
 #endif
 
+    qapp.setOrganizationName(INTERNAL_ORGANIZATION_NAME);
+    qapp.setOrganizationDomain(INTERNAL_ORGANIZATION_DOMAIN);
+
+    //
+    // Initialize crash handler early to catch crashes during startup
+    // (Must be after QCoreApplication is created to use QCoreApplication::applicationDirPath)
+    //
+    {
+        TwkUtil::CrashHandler& crashHandler = TwkUtil::CrashHandler::instance();
+
+        QString handlerPath;
+#ifdef PLATFORM_WINDOWS
+        handlerPath = QCoreApplication::applicationDirPath() + "/crashpad_handler.exe";
+        string platformName = "Windows";
+#elif defined(PLATFORM_LINUX)
+        handlerPath = QCoreApplication::applicationDirPath() + "/crashpad_handler";
+        string platformName = "Linux";
+#else
+        handlerPath = QCoreApplication::applicationDirPath() + "/crashpad_handler";
+        string platformName = "Unknown";
+#endif
+
+        ostringstream versionStr;
+        versionStr << MAJOR_VERSION << "." << MINOR_VERSION << "." << REVISION_NUMBER;
+
+        crashHandler.initialize("RVIO", versionStr.str(), handlerPath.toStdString());
+        crashHandler.addAnnotation("platform", platformName);
+    }
+
     Rv::Options& opts = Rv::Options::sharedOptions();
 
     opts.exrcpus = SystemInfo::numCPUs();
@@ -1079,6 +1109,11 @@ int utf8Main(int argc, char* argv[])
     {
         if (!strcmp("--help", argv[i]))
         {
+            //!!!TBR
+            volatile int* a = (int*)(NULL);
+            *a = 1;
+            //!!!TBR
+
             strcpy(argv[i], "-help");
             break;
         }

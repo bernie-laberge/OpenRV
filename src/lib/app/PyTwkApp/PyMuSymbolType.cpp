@@ -9,6 +9,7 @@
 #include <PyTwkApp/PyEventType.h>
 
 #include <TwkPython/PyLockObject.h>
+#include <TwkUtil/CrashHandler.h>
 #include <Python.h>
 
 #include <Mu/ClassInstance.h>
@@ -230,7 +231,7 @@ namespace TwkApp
         PyLockObject locker;
         PyMuSymbolObject* self;
 
-        if (self = (PyMuSymbolObject*)type->tp_alloc(type, 0))
+        if ((self = (PyMuSymbolObject*)type->tp_alloc(type, 0)))
         {
             self->symbol = 0;
             self->function = 0;
@@ -386,7 +387,50 @@ namespace TwkApp
 
         try
         {
+            // Add crash context annotations before executing Mu function
+            if (TwkUtil::CrashHandler::instance().isInitialized())
+            {
+                // Add Mu function name
+                TwkUtil::CrashHandler::instance().addAnnotation("current_mu_function", self->function->fullyQualifiedName());
+
+                // Add Mu script file location
+                if (const Mu::Module* module = self->function->globalModule())
+                {
+                    TwkUtil::CrashHandler::instance().addAnnotation("mu_script_file", std::string(module->location().c_str()));
+                }
+
+                // Get Python calling context (Python 3.11+ opaque frame API)
+                PyFrameObject* frame = PyEval_GetFrame();
+                if (frame)
+                {
+                    PyCodeObject* code = PyFrame_GetCode(frame);
+                    if (code)
+                    {
+                        const char* filename = PyUnicode_AsUTF8(code->co_filename);
+                        const char* funcname = PyUnicode_AsUTF8(code->co_name);
+                        int lineno = PyFrame_GetLineNumber(frame);
+
+                        if (filename)
+                        {
+                            ostringstream pyContext;
+                            pyContext << filename << ":" << lineno;
+                            if (funcname)
+                                pyContext << " in " << funcname << "()";
+                            TwkUtil::CrashHandler::instance().addAnnotation("python_caller", pyContext.str());
+                        }
+                        Py_DECREF(code);
+                    }
+                }
+            }
+
             const Mu::Value v = muAppThread()->call(self->function, muargs, false);
+
+            // Clear crash context after successful execution
+            if (TwkUtil::CrashHandler::instance().isInitialized())
+            {
+                TwkUtil::CrashHandler::instance().addAnnotation("current_mu_function", "");
+                TwkUtil::CrashHandler::instance().addAnnotation("python_caller", "");
+            }
 
             if (muAppThread()->uncaughtException())
             {
@@ -399,6 +443,13 @@ namespace TwkApp
         }
         catch (std::exception& exc)
         {
+            // Clear crash context on exception
+            if (TwkUtil::CrashHandler::instance().isInitialized())
+            {
+                TwkUtil::CrashHandler::instance().addAnnotation("current_mu_function", "");
+                TwkUtil::CrashHandler::instance().addAnnotation("python_caller", "");
+            }
+
             ostringstream str;
             str << "Exception thrown while calling " << self->function->fullyQualifiedName();
 
@@ -425,6 +476,13 @@ namespace TwkApp
         }
         catch (...)
         {
+            // Clear crash context on exception
+            if (TwkUtil::CrashHandler::instance().isInitialized())
+            {
+                TwkUtil::CrashHandler::instance().addAnnotation("current_mu_function", "");
+                TwkUtil::CrashHandler::instance().addAnnotation("python_caller", "");
+            }
+
             ostringstream str;
             str << "Exception thrown while calling " << self->function->fullyQualifiedName();
 

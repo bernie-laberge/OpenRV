@@ -47,6 +47,7 @@ SET(_sources
     sgcJobDispatcher.cpp
     sgcRefCounted.cpp
     FileLogger.cpp
+    CrashHandler.cpp
 )
 
 ADD_LIBRARY(
@@ -64,6 +65,22 @@ TARGET_LINK_LIBRARIES(
   PUBLIC Boost::thread TwkExc TwkMath spdlog::spdlog
   PRIVATE Boost::system Qt::Core stl_ext
 )
+
+# Link Crashpad libraries if available
+IF(RV_DEPS_CRASHPAD_VERSION)
+  TARGET_LINK_LIBRARIES(
+    ${_target}
+    PRIVATE crashpad::client crashpad::util crashpad::minichromium
+  )
+
+  # Link macOS frameworks required by Crashpad
+  IF(RV_TARGET_DARWIN)
+    TARGET_LINK_LIBRARIES(
+      ${_target}
+      PRIVATE "-framework Foundation" "-framework Security" "-framework IOKit" "-framework ApplicationServices" bsm
+    )
+  ENDIF()
+ENDIF()
 
 IF(RV_TARGET_LINUX)
   SET(THREADS_PREFER_PTHREAD_FLAG
