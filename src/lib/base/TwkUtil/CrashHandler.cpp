@@ -383,7 +383,7 @@ namespace TwkUtil
                                               "",                              // http_proxy (empty - no uploads)
                                               m_annotations,                   // annotations
                                               m_arguments,                     // arguments
-                                              true,                            // restartable
+                                              false,                           // restartable: false prevents respawn loops on Linux
                                               false);                          // asynchronous_start
 
         if (!success)
@@ -451,7 +451,7 @@ namespace TwkUtil
                                               "",                              // http_proxy
                                               m_annotations,                   // annotations
                                               m_arguments,                     // arguments
-                                              true,                            // restartable
+                                              false,                           // restartable: false prevents respawn loops on Linux
                                               false,                           // asynchronous_start
                                               m_attachments);                  // attachments
         if (!success)
