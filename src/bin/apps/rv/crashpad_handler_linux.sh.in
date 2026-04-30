@@ -13,7 +13,7 @@
 #   RV is waiting on and allows RV to exit cleanly instead of freezing forever.
 #
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LOG_DIR="${RV_CRASH_DUMPS_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/RV/Crashes}"
+LOG_DIR="${RV_CRASH_DUMPS_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/@RV_INTERNAL_ORGANIZATION_NAME@/@RV_INTERNAL_APPLICATION_NAME@/Crashes}"
 mkdir -p "$LOG_DIR"
 ulimit -t 30
 exec "${SCRIPT_DIR}/crashpad_handler" "$@" 2>>"${LOG_DIR}/crashpad_handler.log"

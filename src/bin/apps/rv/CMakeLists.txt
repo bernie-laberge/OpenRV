@@ -156,16 +156,17 @@ RV_STAGE(TYPE "MAIN_EXECUTABLE" TARGET ${_target})
 # Install symbolication helper scripts (Linux only — macOS is handled in nsapps/RV/CMakeLists.txt)
 IF(RV_TARGET_LINUX)
   CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/symbolicate_crash.sh ${RV_STAGE_BIN_DIR}/symbolicate_crash.sh COPYONLY)
+  CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/crashpad_handler_linux.sh.in ${RV_STAGE_BIN_DIR}/crashpad_handler_linux.sh)
   FILE(
-    COPY ${CMAKE_CURRENT_SOURCE_DIR}/crashpad_handler_linux.sh
-    DESTINATION ${RV_STAGE_BIN_DIR}
-    FILE_PERMISSIONS
-      OWNER_READ
-      OWNER_WRITE
-      OWNER_EXECUTE
-      GROUP_READ
-      GROUP_EXECUTE
-      WORLD_READ
-      WORLD_EXECUTE
+    CHMOD
+    ${RV_STAGE_BIN_DIR}/crashpad_handler_linux.sh
+    PERMISSIONS
+    OWNER_READ
+    OWNER_WRITE
+    OWNER_EXECUTE
+    GROUP_READ
+    GROUP_EXECUTE
+    WORLD_READ
+    WORLD_EXECUTE
   )
 ENDIF()
