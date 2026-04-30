@@ -439,9 +439,8 @@ namespace TwkUtil
         base::FilePath logPath = StringToFilePath(logFilePath);
         m_attachments.push_back(logPath);
 
-        // Restart the handler so it picks up the new attachment.
-        // getsentry/crashpad supports attachments on all platforms via StartHandler.
-        // AddAttachment() is only available on Windows/Linux, so we restart uniformly.
+#if defined(PLATFORM_DARWIN)
+        // On macOS AddAttachment() is not available; restart the handler with all attachments.
         m_client = std::make_unique<crashpad::CrashpadClient>();
         base::FilePath dbPath = StringToFilePath(m_crashDumpDir);
         bool success = m_client->StartHandler(StringToFilePath(m_handlerPath), // handler path
@@ -460,6 +459,10 @@ namespace TwkUtil
             m_attachments.pop_back();
             return;
         }
+#else
+        m_client->AddAttachment(logPath);
+#endif
+
         std::cout << "INFO: Registered log file for crash dump attachment: " << logFilePath << std::endl;
     }
 
