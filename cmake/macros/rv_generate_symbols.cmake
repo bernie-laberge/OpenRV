@@ -71,12 +71,25 @@ FUNCTION(RV_GENERATE_SYMBOLS)
     VERBATIM
   )
 
+  # On Linux, RV_STAGE renames the binary to .bin and installs a shell wrapper in its place.  dump_syms runs before the rename (so it sees the real ELF), but
+  # records the pre-rename name as the module.  Pass the final .bin name so organize_symbols.sh can patch the module name before building the directory tree.
+  SET(_organize_module_name
+      ""
+  )
+  IF(RV_TARGET_LINUX
+     AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${arg_TARGET}.wrapper
+  )
+    SET(_organize_module_name
+        "${arg_TARGET}.bin"
+    )
+  ENDIF()
+
   # Organize .sym file in Breakpad directory structure (symbols/MODULE_NAME/MODULE_ID/)
   ADD_CUSTOM_COMMAND(
     TARGET ${arg_TARGET}
     POST_BUILD
     COMMENT "Organizing Breakpad symbols for ${arg_TARGET}"
-    COMMAND bash ${_organize_script} ${_sym_file} ${_symbols_dir}
+    COMMAND bash ${_organize_script} ${_sym_file} ${_symbols_dir} ${_organize_module_name}
     VERBATIM
   )
 ENDFUNCTION()

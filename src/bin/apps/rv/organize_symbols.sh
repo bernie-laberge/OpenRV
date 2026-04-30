@@ -13,6 +13,7 @@ set -e
 
 SYM_FILE="$1"
 OUTPUT_DIR="$2"
+MODULE_NAME_OVERRIDE="${3:-}"  # optional: rename the module (e.g. rv → rv.bin)
 
 if [ ! -f "$SYM_FILE" ]; then
     echo "ERROR: Symbol file not found: $SYM_FILE"
@@ -20,9 +21,18 @@ if [ ! -f "$SYM_FILE" ]; then
 fi
 
 # Extract MODULE_ID and MODULE_NAME from first line of .sym file
-# Format: MODULE mac arm64 MODULE_ID MODULE_NAME
+# Format: MODULE <os> <arch> MODULE_ID MODULE_NAME
 MODULE_ID=$(head -1 "$SYM_FILE" | awk '{print $4}')
 MODULE_NAME=$(head -1 "$SYM_FILE" | awk '{print $5}')
+
+# On Linux the binary is renamed to .bin by RV_STAGE after dump_syms runs, so
+# the sym file records the pre-rename name.  Patch line 1 so minidump_stackwalk
+# can match the module name reported in the crash dump.
+if [ -n "$MODULE_NAME_OVERRIDE" ] && [ "$MODULE_NAME" != "$MODULE_NAME_OVERRIDE" ]; then
+    sed "1s/ ${MODULE_NAME}$/ ${MODULE_NAME_OVERRIDE}/" "$SYM_FILE" > "${SYM_FILE}.tmp"
+    mv "${SYM_FILE}.tmp" "$SYM_FILE"
+    MODULE_NAME="$MODULE_NAME_OVERRIDE"
+fi
 
 # Create directory structure
 SYMBOL_DIR="$OUTPUT_DIR/$MODULE_NAME/$MODULE_ID"
