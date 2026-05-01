@@ -98,8 +98,6 @@ ENDIF()
 
 RV_STAGE(TYPE "MAIN_EXECUTABLE" TARGET ${_target})
 
-RV_GENERATE_SYMBOLS(TARGET ${_target})
-
 IF(RV_DEPS_BREAKPAD_VERSION)
   SET(_scripts_src
       ${PROJECT_SOURCE_DIR}/src/bin/apps/rv
