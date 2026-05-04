@@ -88,6 +88,20 @@ echo ""
 
 "$MINIDUMP_STACKWALK" "$CRASH_DMP" "$SYMBOLS_DIR" > "$OUTPUT"
 
+# Replace "GPU: UNKNOWN" with actual GPU info from crashpad annotations if available
+if [ -n "$MINIDUMP_DUMP" ] && [ -f "$MINIDUMP_DUMP" ]; then
+    GPU_RENDERER=$("$MINIDUMP_DUMP" "$CRASH_DMP" 2>/dev/null | \
+        grep -E 'crashpad_annotations\["gpu_renderer"\]' | \
+        sed 's/.*= //' | tr -d '"')
+    GPU_VENDOR=$("$MINIDUMP_DUMP" "$CRASH_DMP" 2>/dev/null | \
+        grep -E 'crashpad_annotations\["gpu_vendor"\]' | \
+        sed 's/.*= //' | tr -d '"')
+    if [ -n "$GPU_RENDERER" ]; then
+        GPU_INFO="${GPU_VENDOR:+${GPU_VENDOR} }${GPU_RENDERER}"
+        sed -i "s|^GPU: UNKNOWN|GPU: ${GPU_INFO}|" "$OUTPUT"
+    fi
+fi
+
 # Append Crashpad annotations if minidump_dump is available
 if [ -n "$MINIDUMP_DUMP" ] && [ -f "$MINIDUMP_DUMP" ]; then
     echo "" >> "$OUTPUT"

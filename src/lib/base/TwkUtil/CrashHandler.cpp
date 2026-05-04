@@ -224,6 +224,10 @@ namespace TwkUtil
         char g_pyScriptLineBuffer[64];
         char g_pyFunctionBuffer[kAnnotationBufferSize];
 
+        // GPU annotations
+        char g_gpuVendorBuffer[kAnnotationBufferSize];
+        char g_gpuRendererBuffer[kAnnotationBufferSize];
+
         // Crashpad annotation objects for Mu
         crashpad::Annotation g_muScriptFile(crashpad::Annotation::Type::kString, "mu_script_file", g_muScriptFileBuffer);
         crashpad::Annotation g_muScriptLine(crashpad::Annotation::Type::kString, "mu_script_line", g_muScriptLineBuffer);
@@ -233,6 +237,10 @@ namespace TwkUtil
         crashpad::Annotation g_pyScriptFile(crashpad::Annotation::Type::kString, "py_script_file", g_pyScriptFileBuffer);
         crashpad::Annotation g_pyScriptLine(crashpad::Annotation::Type::kString, "py_script_line", g_pyScriptLineBuffer);
         crashpad::Annotation g_pyFunction(crashpad::Annotation::Type::kString, "py_function", g_pyFunctionBuffer);
+
+        // Crashpad annotation objects for GPU
+        crashpad::Annotation g_gpuVendor(crashpad::Annotation::Type::kString, "gpu_vendor", g_gpuVendorBuffer);
+        crashpad::Annotation g_gpuRenderer(crashpad::Annotation::Type::kString, "gpu_renderer", g_gpuRendererBuffer);
 
         // Map of annotation names to their Crashpad annotation objects
         struct AnnotationMapping
@@ -250,6 +258,8 @@ namespace TwkUtil
             {"py_script_file", &g_pyScriptFile, g_pyScriptFileBuffer, kAnnotationBufferSize},
             {"py_script_line", &g_pyScriptLine, g_pyScriptLineBuffer, 64},
             {"py_function", &g_pyFunction, g_pyFunctionBuffer, kAnnotationBufferSize},
+            {"gpu_vendor", &g_gpuVendor, g_gpuVendorBuffer, kAnnotationBufferSize},
+            {"gpu_renderer", &g_gpuRenderer, g_gpuRendererBuffer, kAnnotationBufferSize},
         };
     } // namespace
 
