@@ -281,6 +281,17 @@ namespace IPCore
             return ns;
         }
 
+        // Emit a non-fatal warning when the regex/brace-counting heuristic
+        // used to inject LUT samplers fails on OCIO-generated shader text.
+        // The shader will likely render incorrectly (black image), so make
+        // this visible by default rather than silently dropping the patch.
+        void warnShaderPatch(const std::string& reason, const std::string& lutSamplerName)
+        {
+            std::cerr << "WARNING: OCIOIPNode: shader LUT-parameter injection failed: " << reason << " (LUT sampler: " << lutSamplerName
+                      << ")."
+                      << " Image may render incorrectly." << std::endl;
+        }
+
         // Returns true if 'text' contains 'word' as a whole identifier token
         // (not as a substring of a longer alphanumeric/underscore identifier).
         bool containsWholeWord(std::string_view text, const std::string& word)
@@ -345,7 +356,10 @@ namespace IPCore
 
                 // If brace matching failed (malformed GLSL), skip this function
                 if (bodyEnd == std::string::npos || depth != 0)
+                {
+                    warnShaderPatch("unbalanced braces while locating body of function '" + match.str(2) + "'", lutSamplerName);
                     break;
+                }
 
                 // Finally, check if the LUT is in the function body
                 {
@@ -418,7 +432,10 @@ namespace IPCore
                         }
 
                         if (depth != 0)
+                        {
+                            warnShaderPatch("unbalanced parentheses at call site of function '" + name + "'", lutSamplerName);
                             continue; // malformed, skip
+                        }
 
                         size_t closeParenPos = pos;
 
@@ -712,11 +729,7 @@ namespace IPCore
 
                     // Add the LUTs'shader uniform as a shader function
                     // parameter
-                    cout << "!!!OCIONode: adding 1D LUT as parameter: " << m_1DLUTs[idx]->samplerName() << " "
-                         << m_1DLUTs[idx]->samplerType() << endl;
-                    cout << "!!!OCIONode: glsl before: " << glsl << endl;
                     shaderAddLutAsParameter(glsl, m_1DLUTs[idx]->samplerName(), m_1DLUTs[idx]->samplerType());
-                    cout << "!!!OCIONode: glsl after: " << glsl << endl;
                 }
 
                 m_3DLUTs.clear();
@@ -727,11 +740,7 @@ namespace IPCore
 
                     // Add the LUTs'shader uniform as a shader function
                     // parameter
-                    cout << "!!!OCIONode: adding 3D LUT as parameter: " << m_3DLUTs[idx]->samplerName() << " "
-                         << m_3DLUTs[idx]->samplerType() << endl;
-                    cout << "!!!OCIONode: glsl before: " << glsl << endl;
                     shaderAddLutAsParameter(glsl, m_3DLUTs[idx]->samplerName(), m_3DLUTs[idx]->samplerType());
-                    cout << "!!!OCIONode: glsl after: " << glsl << endl;
                 }
 
                 m_state->function =
