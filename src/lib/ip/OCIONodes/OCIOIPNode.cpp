@@ -318,8 +318,11 @@ namespace IPCore
             if (lutSamplerName.empty())
                 return functions;
 
-            static const std::regex functionStartRegex(R"(^([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^;{}]*)\)\s*\{)",
-                                                       std::regex_constants::multiline);
+            // Match "(?:^|\n)" instead of using std::regex_constants::multiline:
+            // the latter is only implemented in libstdc++ 11+ / libc++ 11+, and
+            // older toolchains (e.g. GCC 8.5 on RHEL/Rocky 8) don't have the constant.
+            static const std::regex functionStartRegex(
+                R"((?:^|\n)([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^;{}]*)\)\s*\{)");
 
             auto searchBegin = inout_glsl.cbegin();
             std::smatch match;
