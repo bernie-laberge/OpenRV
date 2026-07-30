@@ -94,8 +94,16 @@ namespace IPCore
         fb = 0;
         pixelAspect = res.pixelAspect;
         initPixelAspect = res.pixelAspect;
-        width = d->internalWidth() - m.left - m.right;
-        height = d->internalHeight() - m.top - m.bottom;
+        //
+        //  A null device is a supported input here: the two queries above
+        //  already fall back to a 1x1 resolution, and callers pass a device
+        //  that can legitimately be absent -- e.g.
+        //  DisplayGroupIPNode::evaluate() forwards imageDevice(), which is null
+        //  until an output device is attached. Use the same fallback rather
+        //  than dereferencing d.
+        //
+        width = (d ? d->internalWidth() : res.width) - m.left - m.right;
+        height = (d ? d->internalHeight() : res.height) - m.top - m.bottom;
         if (pixelAspect > 0.0 && pixelAspect < 1.0)
             height /= pixelAspect;
         if (pixelAspect > 1.0)
