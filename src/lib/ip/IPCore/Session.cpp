@@ -3223,7 +3223,23 @@ namespace IPCore
         //  This is the "heartbeat" entry point in the session
         //
 
-        if (force || isUpdating() || m_rangeDirty)
+        //
+        //  Redraw when something actually asked for one, rather than for the
+        //  whole settle window.
+        //
+        //  isUpdating() is isPlaying() || m_stopTimer.isRunning(), and
+        //  askForRedraw() opens that 2 second stop timer -- so a single static
+        //  redraw request used to repaint at heartbeat rate for ~2s after the
+        //  one frame that was needed had already been drawn. m_wantsRedraw is
+        //  set by askForRedraw() and cleared once rendering starts, so testing
+        //  it directly gives one frame per request while leaving playback
+        //  (isPlaying()) and range changes (m_rangeDirty) untouched.
+        //
+        //  Those wasted repaints run on the Qt main thread, which is also where
+        //  QWebChannel delivers JS->Python web panel calls, so they delayed
+        //  pyevaluate/pyexec round trips.
+        //
+        if (force || isPlaying() || m_wantsRedraw || m_rangeDirty)
         {
             if (multipleVideoDevices() && outputVideoDevice()->willBlockOnTransfer()
                 && (outputVideoDevice()->capabilities() & TwkApp::VideoDevice::ASyncReadBack))
