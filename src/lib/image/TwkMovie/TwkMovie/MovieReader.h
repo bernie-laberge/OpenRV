@@ -9,6 +9,7 @@
 #define __TwkMovie__MovieReader__h__
 #include <TwkMovie/Movie.h>
 #include <TwkMovie/dll_defs.h>
+#include <mutex>
 
 namespace TwkMovie
 {
@@ -129,19 +130,19 @@ namespace TwkMovie
         ///
         virtual void open(const std::string& filename, const MovieInfo& info = MovieInfo(), const ReadRequest& request = ReadRequest());
 
+        virtual void warmOpen();
+
+        virtual void prefetchAtFrame(int frame);
+
         ///
         /// if an additional scanning pass is required after open this
         /// should return true from needsScan() while that is the case.
-        ///
-        /// scan() will be called by a thread which may not be the same
-        /// that called opne(), and should block until complete.
         ///
         /// In addition scanProgress() which may be called from other
         /// threads should return scan progress.
         ///
 
         virtual bool needsScan() const;
-        virtual void scan();
         virtual float scanProgress() const;
 
         ///
@@ -160,6 +161,7 @@ namespace TwkMovie
     protected:
         std::string m_filename; /// derived class should set this to the filename
         ReadRequest m_request;
+        std::mutex m_deferredOpenLock;
     };
 
 } // namespace TwkMovie

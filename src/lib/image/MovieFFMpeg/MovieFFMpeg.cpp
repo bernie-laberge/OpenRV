@@ -20,6 +20,10 @@
 #include <TwkUtil/PathConform.h>
 #include <TwkUtil/File.h>
 #include <TwkUtil/sgcHop.h>
+#include <stream/StreamPreloadPool.h>
+#include <boost/thread/lock_algorithms.hpp>
+#include <boost/thread/mutex.hpp>
+#include <cstddef>
 #include <iostream>
 #include <iomanip>
 #include <algorithm>
@@ -34,13 +38,13 @@
 #include <mutex>
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/operations.hpp>
-#include <boost/thread/mutex.hpp>
 #include <boost/thread/lock_guard.hpp>
 #include <boost/algorithm/string.hpp>
 #include <mp4v2Utils/mp4v2Utils.h>
 #include <cstring>
 
 #include <IOhtj2k/IOhtj2k.h>
+#include <stream/StreamCachePath.h>
 
 #if defined(RV_FFMPEG_USE_VIDEOTOOLBOX)
 #include <VideoToolbox/VideoToolbox.h>
@@ -63,6 +67,7 @@ extern "C"
 #endif
 
 static ENVVAR_BOOL(evUseUploadedMovieForStreaming, "RV_SHOTGRID_USE_UPLOADED_MOVIE_FOR_STREAMING", false);
+static ENVVAR_FLOAT(evPlayheadPrefetchSeconds, "RV_STREAM_PLAYHEAD_PREFETCH_SECONDS", 5.0f);
 
 namespace TwkMovie
 {
@@ -1295,6 +1300,75 @@ namespace TwkMovie
 #endif
     }
 
+    void MovieFFMpegReader::warmOpen()
+    {
+        if (m_filename.empty())
+        {
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(m_deferredOpenLock);
+
+        if (m_avFormatContext != nullptr)
+        {
+            return;
+        }
+
+        try
+        {
+            openAVFormat();
+            findStreamInfo();
+        }
+        catch (const std::exception& exc)
+        {
+            if (m_avFormatContext != nullptr)
+            {
+                avformat_close_input(&m_avFormatContext);
+                m_avFormatContext = nullptr;
+            }
+
+            DBL(DB_GENERAL, "warmOpen failed for " << m_filename << ": " << exc.what());
+        }
+        catch (...)
+        {
+            if (m_avFormatContext != nullptr)
+            {
+                avformat_close_input(&m_avFormatContext);
+                m_avFormatContext = nullptr;
+            }
+        }
+    }
+
+    void MovieFFMpegReader::prefetchAtFrame(int frame)
+    {
+        const float windowSeconds = evPlayheadPrefetchSeconds.getValue();
+        if (!TwkUtil::pathIsURL(m_filename) || windowSeconds <= 0.0f || m_info.fps <= 0.0f)
+            return;
+
+        const double frameSeconds = std::max(0.0, double(frame - m_info.start) / double(m_info.fps));
+        const int64_t window = static_cast<int64_t>(frameSeconds / windowSeconds);
+        if (m_lastPrefetchWindow.exchange(window) == window)
+            return;
+
+        std::string url = m_filename;
+        if (evUseUploadedMovieForStreaming.getValue())
+            boost::replace_all(url, "#.mp4", "");
+        url = "shared:" + url;
+
+        StreamerPool::Options options;
+        options.emplace_back("cache_dir", streamCachePath());
+        options.emplace_back("seekable", "1");
+        options.emplace_back("reconnect", "1");
+        options.emplace_back("multiple_requests", "1");
+        for (const auto& [name, value] : m_request.parameters)
+        {
+            if (name == "cookies" || name == "headers")
+                options.emplace_back(name, value);
+        }
+
+        StreamerPool::getPool().enqueueWindow(url, options, frameSeconds, windowSeconds);
+    }
+
     bool MovieFFMpegReader::openAVFormat()
     {
         const bool filepathIsURL = TwkUtil::pathIsURL(m_filename);
@@ -1316,6 +1390,12 @@ namespace TwkMovie
         AVDictionary* fmtOptions = NULL;
         if (filepathIsURL)
         {
+            safe_path = "shared:" + safe_path;
+            av_dict_set_int(&fmtOptions, "seekable", 1, 0);
+            av_dict_set_int(&fmtOptions, "reconnect", 1, 0);
+            av_dict_set_int(&fmtOptions, "multiple_requests", 1, 0);
+            av_dict_set(&fmtOptions, "cache_dir", streamCachePath().c_str(), 0);
+
             for (int i = 0; i < m_request.parameters.size(); i++)
             {
                 const string& name = m_request.parameters[i].first;
@@ -1323,22 +1403,17 @@ namespace TwkMovie
                 if (name == "cookies")
                 {
                     av_dict_set(&fmtOptions, "cookies", value.c_str(), 0);
-                    av_dict_set_int(&fmtOptions, "seekable", 1, 0);
-                    av_dict_set_int(&fmtOptions, "reconnect", 1, 0);
-                    av_dict_set_int(&fmtOptions, "multiple_requests", 1, 0);
                 }
                 else if (name == "headers")
                 {
                     av_dict_set(&fmtOptions, "headers", value.c_str(), 0);
-                    av_dict_set_int(&fmtOptions, "seekable", 1, 0);
-                    av_dict_set_int(&fmtOptions, "reconnect", 1, 0);
-                    av_dict_set_int(&fmtOptions, "multiple_requests", 1, 0);
                 }
             }
         }
 
         // Open the file
         const int ret = avformat_open_input(&m_avFormatContext, safe_path.c_str(), 0, &fmtOptions);
+        av_dict_free(&fmtOptions);
         if (ret != 0)
             TWK_THROW_EXC_STREAM("Failed to open " << m_filename << " for reading: " << avErr2Str(ret));
 
@@ -1375,11 +1450,20 @@ namespace TwkMovie
 
     bool MovieFFMpegReader::openAVCodec(int index, AVCodecContext** avCodecContext, HardwareContext* hardwareContext)
     {
-        // Make sure the format is opened
+        //
+        //  Make sure the format is opened
+        //
+
+        std::lock_guard<std::mutex> lock(m_deferredOpenLock);
         if (m_avFormatContext == nullptr)
         {
             openAVFormat();
             findStreamInfo();
+        }
+
+        if (m_avFormatContext == nullptr)
+        {
+            return false;
         }
 
         // Get the codec context
@@ -2595,7 +2679,7 @@ namespace TwkMovie
             AVCodecContext* videoCodecContext = track->avCodecContext;
 
             // Tell RV to restrict caching to one thread
-            bool slowTrackRandomAccess = (codecHasSlowAccess(videoCodecContext->codec->name) || TwkUtil::pathIsURL(m_filename));
+            bool slowTrackRandomAccess = codecHasSlowAccess(videoCodecContext->codec->name);
             slowRandomAccess = slowTrackRandomAccess || slowRandomAccess;
 
             // Make sure the orientation/rotation matches for each track
@@ -2824,11 +2908,6 @@ namespace TwkMovie
             fb->newAttribute("View", view);
         fb->newAttribute("File", m_filename);
         fb->newAttribute("Sequence", m_filename);
-    }
-
-    void MovieFFMpegReader::scan()
-    {
-        // NO LONGER NEEDED
     }
 
     void MovieFFMpegReader::collectPlaybackTiming(vector<bool> heroVideoTracks, vector<bool> heroAudioTracks)
