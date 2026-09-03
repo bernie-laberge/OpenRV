@@ -2033,6 +2033,36 @@ namespace Rv
                            });
     }
 
+    void RvDocument::showEvent(QShowEvent* event)
+    {
+        QMainWindow::showEvent(event);
+
+        if (m_hdpiResizeWorkaroundDone)
+            return;
+
+        m_hdpiResizeWorkaroundDone = true;
+
+#if defined(PLATFORM_DARWIN)
+        const bool needWorkaround = true;
+#else
+        const bool needWorkaround = (devicePixelRatio() > 1.0);
+#endif
+
+        if (!needWorkaround)
+            return;
+
+        // Under Qt6/QOpenGLWidget, initial HDPI scaling can be wrong until the
+        // main view is resized once after it is shown. Defer until showEvent so
+        // child widgets (including any QML-backed UI) are fully constructed.
+        QTimer::singleShot(0, this,
+                           [this]()
+                           {
+                               QSize currentSize = size();
+                               resize(currentSize.width() + 1, currentSize.height());
+                               resize(currentSize);
+                           });
+    }
+
     void RvDocument::resizeEvent(QResizeEvent* event)
     {
         QMainWindow::resizeEvent(event);
