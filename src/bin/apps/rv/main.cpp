@@ -106,6 +106,193 @@
 #include <QtQuick/QSGRendererInterface>
 #endif
 #include <RvCommon/RvDocument.h>
+#include <IPCore/PlaybackTrace.h>
+#include <algorithm>
+
+namespace
+{
+    //
+    //  QApplication that times main-thread event delivery for the playback
+    //  trace (RV_PLAYBACK_TRACE). It shows which Qt events (timers, queued
+    //  calls, input, plugin work) run between a redraw request and the paint
+    //  when a frame is late. Without the trace this is one flag check per
+    //  event.
+    //
+    class TracingApplication : public QApplication
+    {
+    public:
+        using QApplication::QApplication;
+
+        bool notify(QObject* receiver, QEvent* e) override
+        {
+            //  notify() also runs on other threads for their objects' events;
+            //  only the main (GUI) thread is traced, and m_depth is only
+            //  touched there.
+            if (!IPCore::PlaybackTrace::enabled() || QThread::currentThread() != thread())
+                return QApplication::notify(receiver, e);
+
+            //  Nested delivery (sendEvent from inside an event, or a nested
+            //  event loop) is part of the enclosing top-level event.
+            if (m_depth > 0)
+            {
+                ++m_depth;
+                DepthGuard guard(m_depth);
+
+                //  Widget paints and geometry/visibility changes are traced
+                //  individually: they show which widgets a main-window
+                //  repaint covers, and which change triggered the relayout.
+                const QEvent::Type type = e->type();
+                const bool paint = type == QEvent::Paint;
+                const bool change = type == QEvent::Resize || type == QEvent::Show || type == QEvent::Hide || type == QEvent::LayoutRequest;
+                if (!(paint || change) || !receiver || !receiver->isWidgetType())
+                    return QApplication::notify(receiver, e);
+
+                std::string description = eventTypeName(type);
+                description += ":" + widgetPath(receiver);
+                if (paint)
+                {
+                    const QRect rect = static_cast<QPaintEvent*>(e)->rect();
+                    description += "[" + std::to_string(rect.width()) + "x" + std::to_string(rect.height()) + "]";
+                }
+                else if (type == QEvent::Resize)
+                {
+                    const QResizeEvent* re = static_cast<QResizeEvent*>(e);
+                    description += "[" + std::to_string(re->oldSize().width()) + "x" + std::to_string(re->oldSize().height()) + "->"
+                                   + std::to_string(re->size().width()) + "x" + std::to_string(re->size().height()) + "]";
+                }
+                std::replace(description.begin(), description.end(), ' ', '_');
+
+                const double start = IPCore::PlaybackTrace::now();
+                const bool result = QApplication::notify(receiver, e);
+                IPCore::PlaybackTrace::widgetEvent(paint, description, (IPCore::PlaybackTrace::now() - start) * 1000.0);
+                return result;
+            }
+
+            //  Captured before delivery: the receiver may be deleted by it.
+            const QEvent::Type type = e->type();
+            const char* typeName = eventTypeName(type);
+            const QMetaObject* receiverMeta = receiver ? receiver->metaObject() : nullptr;
+            const QString receiverName = receiver ? receiver->objectName() : QString();
+            const QObject* parent = receiver ? receiver->parent() : nullptr;
+            const QMetaObject* parentMeta = parent ? parent->metaObject() : nullptr;
+            const QString parentName = parent ? parent->objectName() : QString();
+
+            //  Posted LayoutRequest/Show/Hide arrive as top-level events.
+            std::string changeDescription;
+            if (receiver && receiver->isWidgetType()
+                && (type == QEvent::LayoutRequest || type == QEvent::Show || type == QEvent::Hide || type == QEvent::Resize))
+            {
+                changeDescription = std::string(typeName) + ":" + widgetPath(receiver);
+                std::replace(changeDescription.begin(), changeDescription.end(), ' ', '_');
+            }
+
+            const double start = IPCore::PlaybackTrace::now();
+            IPCore::PlaybackTrace::eventBegin(start, typeName);
+
+            bool result = false;
+            {
+                ++m_depth;
+                DepthGuard guard(m_depth);
+                EndGuard end(start, typeName, receiverMeta, receiverName, parentMeta, parentName);
+                result = QApplication::notify(receiver, e);
+            }
+
+            if (!changeDescription.empty())
+                IPCore::PlaybackTrace::widgetEvent(false, changeDescription, (IPCore::PlaybackTrace::now() - start) * 1000.0);
+            return result;
+        }
+
+    private:
+        struct DepthGuard
+        {
+            explicit DepthGuard(int& depth)
+                : m_depth(depth)
+            {
+            }
+
+            ~DepthGuard() { --m_depth; }
+
+            int& m_depth;
+        };
+
+        //  Ends the trace event even if delivery throws.
+        struct EndGuard
+        {
+            EndGuard(double start, const char* typeName, const QMetaObject* receiverMeta, const QString& receiverName,
+                     const QMetaObject* parentMeta, const QString& parentName)
+                : m_start(start)
+                , m_typeName(typeName)
+                , m_receiverMeta(receiverMeta)
+                , m_receiverName(receiverName)
+                , m_parentMeta(parentMeta)
+                , m_parentName(parentName)
+            {
+            }
+
+            ~EndGuard()
+            {
+                const double end = IPCore::PlaybackTrace::now();
+                std::string description;
+                if ((end - m_start) * 1000.0 >= IPCore::PlaybackTrace::eventDetailMs)
+                    description = describe();
+                IPCore::PlaybackTrace::eventEnd(end, description);
+            }
+
+            //  e.g. Timer:QTimer'RvApplication::m_timer'<-Rv::RvApplication
+            //  No spaces, so the trace can use it as a culprit key.
+            std::string describe() const
+            {
+                std::string d = m_typeName;
+                d += ":";
+                d += m_receiverMeta ? m_receiverMeta->className() : "null";
+                if (!m_receiverName.isEmpty())
+                    d += "'" + m_receiverName.toStdString() + "'";
+                if (m_parentMeta)
+                {
+                    d += "<-";
+                    d += m_parentMeta->className();
+                    if (!m_parentName.isEmpty())
+                        d += "'" + m_parentName.toStdString() + "'";
+                }
+                std::replace(d.begin(), d.end(), ' ', '_');
+                return d;
+            }
+
+            double m_start;
+            const char* m_typeName;
+            const QMetaObject* m_receiverMeta;
+            const QString& m_receiverName;
+            const QMetaObject* m_parentMeta;
+            const QString& m_parentName;
+        };
+
+        //  Class'objectName' of the widget and up to two ancestors, innermost
+        //  first, e.g. QLabel<-QToolBar'timeline'<-Rv::RvDocument.
+        static std::string widgetPath(const QObject* o)
+        {
+            std::string path;
+            for (int level = 0; o && level < 3; ++level, o = o->parent())
+            {
+                if (level)
+                    path += "<-";
+                path += o->metaObject()->className();
+                const QString name = o->objectName();
+                if (!name.isEmpty())
+                    path += "'" + name.toStdString() + "'";
+            }
+            return path;
+        }
+
+        static const char* eventTypeName(QEvent::Type type)
+        {
+            static const QMetaEnum e = QMetaEnum::fromType<QEvent::Type>();
+            const char* name = e.valueToKey(type);
+            return name ? name : (type >= QEvent::User ? "User" : "Unknown");
+        }
+
+        int m_depth = 0;
+    };
+} // namespace
 
 // TODO_QT: Remove if everything works.
 // Assuming it is not needed: qtGlobals.cpp stopped being generated since Qt 4.6
@@ -630,7 +817,7 @@ int utf8Main(int argc, char* argv[])
     //  Application
     //
 
-    QApplication* app = new QApplication(argc, argv);
+    QApplication* app = new TracingApplication(argc, argv);
 
     //
     // Initialize crash handler early to catch crashes during startup

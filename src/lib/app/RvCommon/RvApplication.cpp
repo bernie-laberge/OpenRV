@@ -401,9 +401,18 @@ namespace Rv
         qInstallMessageHandler(myMsgHandlerQT);
         init();
 
+        //  Tooltip roll/fade animations (QRollEffect/QAlphaWidget) run on
+        //  main-thread timers in their own top-level window; during playback
+        //  each animation step delayed the viewer paint by 5-18 ms.
+        QApplication::setEffectEnabled(Qt::UI_AnimateTooltip, false);
+        QApplication::setEffectEnabled(Qt::UI_FadeTooltip, false);
+
         pthread_mutex_init(&m_deleteLock, 0);
         m_timer = new QTimer(this);
         m_timer->setObjectName("RvApplication::m_timer");
+        //  The default coarse timer fires at the OS tick (~15.6ms on Windows)
+        //  instead of every ~8ms, which jitters when frames are drawn.
+        m_timer->setTimerType(Qt::PreciseTimer);
         connect(m_timer, SIGNAL(timeout()), this, SLOT(heartbeat()));
         m_timer->start(int(1.0 / 120.0 * 1000.0));
         m_fireTimer.start();

@@ -1171,6 +1171,7 @@ namespace IPCore
         void play_v2(std::string& eventData);
         void addSyncSample_v2();
         Time predictedTimeUntilSync_v2() const;
+        Time refreshInterval_v2() const;
         void render_v2();
         void postRender_v2();
         int targetFrame_v2(double elapsed) const; // also applies to RV_AVPLAYBACK_VERSION=0

@@ -85,6 +85,18 @@ namespace Rv
         void updateActionAvailability();
         void updatePlayModeButtonState();
 
+        //  Play/pause icons follow the session's playing state. Updates are
+        //  deferred to the event loop and only touch a button whose state
+        //  changed: a loop turn-around (play-stop immediately followed by
+        //  play-start) then changes nothing, instead of two icon changes
+        //  that relayout and repaint the main window during playback.
+        void schedulePlayButtonIconUpdate();
+        void updatePlayButtonIcons();
+
+        bool m_playButtonIconUpdatePending = false;
+        bool m_backwardShowsPause = false;
+        bool m_forwardShowsPause = false;
+
         IPCore::Session* m_session;
         QString m_customCannotUseTooltip;
         QString m_customDisabledPrefix;

@@ -21,6 +21,7 @@
 #include <IPCore/Profile.h>
 #include <IPCore/NodeManager.h>
 #include <IPCore/FBCache.h>
+#include <IPCore/PlaybackTrace.h>
 #include <TwkApp/Event.h>
 #include <TwkGLF/GLContextScope.h>
 #include <TwkContainer/GTOReader.h>
@@ -178,6 +179,7 @@ namespace IPCore
     void AuxUserRender::render(VideoDevice::DisplayMode mode, bool leftEye, bool rightEye, bool forController, bool forOutput) const
     {
         GLPushAttrib attr(GL_ALL_ATTRIB_BITS);
+        PlaybackTrace::Scope traceScope(PlaybackTrace::current().userRenderMs);
         string contents = (leftEye) ? ((rightEye) ? "both" : "left") : "right";
         double startTime = 0;
 
@@ -321,6 +323,20 @@ namespace IPCore
     static bool RV_VSYNC_ADD_OFFSET = false;
     static bool RV_VSYNC_IGNORE_DEVICE = false;
 
+    //
+    //  Realtime cadence lock: when the media rate is within
+    //  RV_CADENCE_LOCK_TOLERANCE of the refresh rate (e.g. 59.94 fps on a
+    //  60Hz display) show exactly one new frame per refresh, and only repeat
+    //  or drop a frame once the playback clock is RV_CADENCE_LOCK_BAND frames
+    //  away from it. Plain rounding of the clock flips between repeat and
+    //  drop whenever the clock/refresh phase drifts near the half-frame
+    //  boundary, which turns a single drift correction into seconds of
+    //  stutter. RV_CADENCE_LOCK=0 disables it.
+    //
+    static bool RV_CADENCE_LOCK = true;
+    static float RV_CADENCE_LOCK_BAND = 0.9f;
+    static float RV_CADENCE_LOCK_TOLERANCE = 0.05f;
+
     Session::Session(IPGraph* graph)
         : TwkApp::Document()
         , m_waitForUploadThreadPrefetch(false)
@@ -455,6 +471,18 @@ namespace IPCore
             else
                 RV_VSYNC_IGNORE_DEVICE = false;
 
+            var = getenv("RV_CADENCE_LOCK");
+            if (var)
+                RV_CADENCE_LOCK = bool(atoi(var));
+
+            var = getenv("RV_CADENCE_LOCK_BAND");
+            if (var)
+                RV_CADENCE_LOCK_BAND = atof(var);
+
+            var = getenv("RV_CADENCE_LOCK_TOLERANCE");
+            if (var)
+                RV_CADENCE_LOCK_TOLERANCE = atof(var);
+
             if (debugPlayback)
             {
                 cerr << "INFO: RV_VSYNC_MAX_INTERVAL " << RV_VSYNC_MAX_INTERVAL << endl;
@@ -462,6 +490,8 @@ namespace IPCore
                 cerr << "INFO: RV_VSYNC_ADD_OFFSET " << RV_VSYNC_ADD_OFFSET << endl;
                 cerr << "INFO: RV_VSYNC_RATE_FORCE " << RV_VSYNC_RATE_FORCE << endl;
                 cerr << "INFO: RV_VSYNC_IGNORE_DEVICE " << RV_VSYNC_IGNORE_DEVICE << endl;
+                cerr << "INFO: RV_CADENCE_LOCK " << RV_CADENCE_LOCK << " band " << RV_CADENCE_LOCK_BAND << " tolerance "
+                     << RV_CADENCE_LOCK_TOLERANCE << endl;
             }
         }
 
@@ -600,6 +630,12 @@ namespace IPCore
         if (debugPlayback)
         {
             cerr << "INFO: RV_AVPLAYBACK_VERSION " << m_avPlaybackVersion << endl;
+        }
+
+        if (const char* traceStr = getenv("RV_PLAYBACK_TRACE"))
+        {
+            if (!PlaybackTrace::enabled() && *traceStr && string(traceStr) != "0")
+                PlaybackTrace::setEnabled(true, traceStr);
         }
 
         //
@@ -766,6 +802,11 @@ namespace IPCore
                 debugPlayback = true;
             else if (name == "playbackverbose")
                 debugPlaybackVerbose = debugPlayback = true;
+            else if (name == "playbacktrace")
+            {
+                if (!PlaybackTrace::enabled())
+                    PlaybackTrace::setEnabled(true);
+            }
             else if (name == "cache")
                 TwkFB::Cache::debug() = true;
             else if (name == "dtree")
@@ -2704,6 +2745,32 @@ namespace IPCore
     //
     TwkMath::Time Session::predictedTimeUntilSync_v2() const
     {
+        const Time interval = refreshInterval_v2();
+
+        if (interval == 0.0)
+            return 0.0;
+
+        if (m_syncLastTime <= 0)
+            return interval;
+
+        //
+        //  If we know when the last sync time happened, use the current time to
+        //  predict the time until the next sync time.
+        //
+
+        Time t = interval - (m_timer.elapsed() - m_syncLastTime);
+
+        if (t > interval)
+            t = interval;
+
+        return t;
+    }
+
+    //
+    //  Refresh period used to predict sync times, or 0 if unknown.
+    //
+    TwkMath::Time Session::refreshInterval_v2() const
+    {
         float interval = 0.0;
 
         //
@@ -2746,25 +2813,8 @@ namespace IPCore
             }
             interval = m_syncInterval;
         }
-        else
-        {
-            return 0.0;
-        }
 
-        if (m_syncLastTime <= 0)
-            return interval;
-
-        //
-        //  If we know when the last sync time happened, use the current time to
-        //  predict the time until the next sync time.
-        //
-
-        Time t = interval - (m_timer.elapsed() - m_syncLastTime);
-
-        if (t > interval)
-            t = interval;
-
-        return t;
+        return interval;
     }
 
     TwkMath::Time Session::predictedTimeUntilSync() const
@@ -3262,11 +3312,15 @@ namespace IPCore
                 double now = TwkUtil::SystemClock().now();
                 if (now >= (m_lastDrawingTime + minElapsedTime))
                 {
+                    PlaybackTrace::heartbeat(true);
                     d->redrawImmediately();
                     m_lastDrawingTime = now;
+                    return;
                 }
             }
         }
+
+        PlaybackTrace::heartbeat(false);
     }
 
     void Session::advanceState()
@@ -3921,6 +3975,22 @@ namespace IPCore
         int currentFrame = m_frame;
         m_skipped = 0;
 
+        if (PlaybackTrace::enabled())
+        {
+            PlaybackTrace::Record& trace = PlaybackTrace::current();
+            trace.playing = playing;
+            trace.realtime = realtime();
+            trace.hasAudio = hasAudio();
+            trace.bufferWait = m_bufferWait;
+            trace.inc = inc();
+            trace.fps = fps();
+            trace.deviceHz = m_outputVideoDevice ? m_outputVideoDevice->timing().hz : 0.0;
+            trace.prevFrame = m_frame;
+            trace.targetFrame = m_frame;
+            trace.shownFrame = m_frame;
+            trace.shiftBefore = m_shift;
+        }
+
         bool outDeviceClock = m_realtimeOverride && multipleVideoDevices() && outputVideoDevice()->hasClock();
 
         // if (m_outputVideoDevice)  cerr << "ovd timing " <<
@@ -3941,6 +4011,8 @@ namespace IPCore
 
             Time untilPredicted = predictedTimeUntilSync_v2();
             elapsed = elapsedPlaySeconds() + untilPredicted + elapsedOffset;
+
+            PlaybackTrace::current().predictedSync = untilPredicted;
 
             if (debugProfile)
             {
@@ -3965,6 +4037,9 @@ namespace IPCore
             {
                 newFrame = targetFrame(elapsed);
 
+                PlaybackTrace::current().elapsed = elapsed;
+                PlaybackTrace::current().targetFrame = newFrame;
+
                 // cerr << "m_frame " << m_frame << " newFrame " << newFrame <<
                 // " elap " << elapsed << " shft " << m_shift << " fps " <<
                 // fps() << " untilPred " << untilPredicted << " tsvalid " <<
@@ -3973,6 +4048,30 @@ namespace IPCore
                 if (RV_VSYNC_ADD_OFFSET && elapsedOffset == 0.0 && newFrame != m_frame)
                 {
                     elapsedOffset = float(newFrame - rangeStart() - m_shift) / fps() - elapsedPlaySeconds();
+                }
+
+                if (RV_CADENCE_LOCK && realtime() && !m_bufferWait && !outDeviceClock && newFrame != nextFrame)
+                {
+                    //
+                    //  See RV_CADENCE_LOCK. Only when there is about one
+                    //  frame per refresh; other ratios keep plain rounding.
+                    //
+
+                    const double interval = refreshInterval_v2();
+                    const double framesPerRefresh = interval * fps();
+
+                    if (interval > 0.0 && fabs(framesPerRefresh - 1.0) < RV_CADENCE_LOCK_TOLERANCE)
+                    {
+                        const double direction = inc() > 0 ? 1.0 : -1.0;
+                        const double exactFrame = direction * elapsed * fps() + m_shift + rangeStart();
+                        const double drift = (exactFrame - nextFrame) * direction;
+
+                        if (fabs(drift) < RV_CADENCE_LOCK_BAND)
+                        {
+                            newFrame = nextFrame;
+                            PlaybackTrace::current().cadenceLocked = true;
+                        }
+                    }
                 }
 
                 if (m_bufferWait || realtime())
@@ -4145,6 +4244,8 @@ namespace IPCore
         if (m_frame < rangeStart())
             setFrameInternal(rangeStart());
 
+        PlaybackTrace::current().wrapped = m_wrapping;
+
         //
         //  The overhead (reading and drawing). Throw the frame up and
         //  figure outhow long it took. If we're reading a complex file
@@ -4153,7 +4254,10 @@ namespace IPCore
         //  constant in the lerp is completely subjective.
         //
 
-        userRenderEvent("pre-render", "");
+        {
+            PlaybackTrace::Scope traceScope(PlaybackTrace::current().preRenderEventMs);
+            userRenderEvent("pre-render", "");
+        }
 
         if (true)
         {
@@ -4163,6 +4267,7 @@ namespace IPCore
                 {
                     stop("buffering");
                     m_bufferWait = true;
+                    PlaybackTrace::current().bufferStop = true;
                 }
             }
             m_rendering = true;
@@ -4181,6 +4286,7 @@ namespace IPCore
                 HOP_CALL(glFinish();)
                 HOP_PROF("Session::render - render_v2 - evaluateForDisplay");
 
+                PlaybackTrace::Scope traceScope(PlaybackTrace::current().evaluateMs);
                 evaluateForDisplay();
 
                 HOP_CALL(glFinish();)
@@ -4191,6 +4297,8 @@ namespace IPCore
                 //  Don't wait here unless there's actually video to cache
                 //  (maybe this evaluation is only generating audio.
                 //
+
+                PlaybackTrace::current().bufferRefill = true;
 
                 bool hasFB = false;
                 for (size_t i = 0; i < m_displayFBStatus.size(); i++)
@@ -4214,6 +4322,7 @@ namespace IPCore
                     }
                     try
                     {
+                        PlaybackTrace::Scope traceScope(PlaybackTrace::current().evaluateMs);
                         evaluateForDisplay();
                     }
                     catch (...)
@@ -4296,7 +4405,20 @@ namespace IPCore
                 AuxUserRender auxRender(this);
                 AuxAudioRenderer auxAudio(this);
 
-                waitForUploadToFinish();
+                //  Upload time is read from the renderer's profiling state,
+                //  which needs a running clock.
+                static TwkUtil::Timer traceUploadTimer;
+                if (PlaybackTrace::enabled() && !debugProfile)
+                {
+                    if (!traceUploadTimer.isRunning())
+                        traceUploadTimer.start();
+                    m_renderer->initProfilingState(&traceUploadTimer);
+                }
+
+                {
+                    PlaybackTrace::Scope traceScope(PlaybackTrace::current().waitUploadMs);
+                    waitForUploadToFinish();
+                }
                 m_waitForUploadThreadPrefetch = m_preEval && useThreadedUpload();
 
                 if (m_waitForUploadThreadPrefetch)
@@ -4307,14 +4429,22 @@ namespace IPCore
                     //
                     //
 
-                    preEval();
+                    {
+                        PlaybackTrace::Scope traceScope(PlaybackTrace::current().preEvalMs);
+                        preEval();
+                    }
 
+                    PlaybackTrace::Scope traceScope(PlaybackTrace::current().rendererMs);
                     m_renderer->render(m_frame, m_displayImage, &auxRender, &auxAudio, m_preDisplayImage);
                 }
                 else
                 {
+                    PlaybackTrace::Scope traceScope(PlaybackTrace::current().rendererMs);
                     m_renderer->render(m_frame, m_displayImage, &auxRender, &auxAudio);
                 }
+
+                if (PlaybackTrace::enabled())
+                    PlaybackTrace::current().uploadMs = m_renderer->profilingState().uploadPlaneTime * 1000.0;
 
                 if (debugProfile)
                 {
@@ -4425,6 +4555,7 @@ namespace IPCore
                 trecord.frameChangeEventStart = profilingElapsedTime();
             }
 
+            PlaybackTrace::Scope traceScope(PlaybackTrace::current().frameChangedMs);
             send(frameChangedMessage());
             size_t f0;
             // if (debugGC) f0 = GC_get_free_bytes();
@@ -4443,6 +4574,14 @@ namespace IPCore
                 trecord.frameChangeEventEnd = profilingElapsedTime();
             }
             HOP_CALL(glFinish();)
+        }
+
+        if (PlaybackTrace::enabled())
+        {
+            PlaybackTrace::Record& trace = PlaybackTrace::current();
+            trace.shownFrame = m_frame;
+            trace.skipped = m_skipped;
+            trace.shiftAfter = m_shift;
         }
 
         m_lastFrame = m_frame;

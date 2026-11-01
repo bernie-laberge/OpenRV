@@ -30,6 +30,7 @@ SET(_target
 SET(_sources
     BrushTextureManager.cpp
     Session.cpp
+    PlaybackTrace.cpp
     Exception.cpp
     IPNode.cpp
     Application.cpp

@@ -15,6 +15,7 @@
 #include <IPCore/ViewGroupIPNode.h>
 #include <IPCore/Exception.h>
 #include <IPCore/IPGraph.h>
+#include <IPCore/PlaybackTrace.h>
 #include <IPCore/IPProperty.h>
 #include <IPCore/NodeManager.h>
 #include <IPCore/OutputGroupIPNode.h>
@@ -1802,7 +1803,11 @@ IPGraph::findNodesByAbstractPath(int frame,
         PROFILE_SAMPLE(cacheTestStart);
 
         PROFILE_SAMPLE(cacheTestLockStart);
+        const bool trace = forDisplay && PlaybackTrace::enabled();
+        const double traceLockStart = trace ? PlaybackTrace::now() : 0.0;
         TWK_CACHE_LOCK(m_fbcache, "");
+        if (trace)
+            PlaybackTrace::current().cacheLockMs = (PlaybackTrace::now() - traceLockStart) * 1000.0;
         PROFILE_SAMPLE(cacheTestLockEnd);
 
         //
@@ -1829,6 +1834,16 @@ IPGraph::findNodesByAbstractPath(int frame,
         PROFILE_SAMPLE(frameCachedTestStart);
         bool isCached = m_fbcache.isFrameCached(frame);
         PROFILE_SAMPLE(frameCachedTestEnd);
+
+        if (trace)
+        {
+            //  Refined below when the display thread has to evaluate.
+            PlaybackTrace::current().frameCached = isCached;
+            PlaybackTrace::current().evalPath = isCached                     ? "cached"
+                                                : m_cacheMode == BufferCache ? "buffer-overrun-eval"
+                                                : m_cacheMode == NeverCache  ? "no-cache-eval"
+                                                                             : "uncached-eval";
+        }
 
         TWK_CACHE_UNLOCK(m_fbcache, "");
         // DB ("evaluateAtFrame f " << frame << " forDisplay " << forDisplay <<
@@ -1879,6 +1894,9 @@ IPGraph::findNodesByAbstractPath(int frame,
                 //  actually needed (which could be never).
                 //
 
+                if (trace)
+                    PlaybackTrace::current().evalPath = "cached-but-miss-eval";
+
                 try
                 {
                     img = evaluate(frame, IPNode::DisplayCacheEvalThread);
@@ -1895,6 +1913,9 @@ IPGraph::findNodesByAbstractPath(int frame,
             catch (CacheFullExc& exc)
             {
                 PROFILE_SAMPLE(evalInternalEnd);
+
+                if (trace)
+                    PlaybackTrace::current().evalPath = "cached-but-cache-full";
 
                 try
                 {

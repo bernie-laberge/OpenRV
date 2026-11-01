@@ -378,6 +378,45 @@ namespace Rv
         }
     }
 
+    void RvBottomViewToolBar::schedulePlayButtonIconUpdate()
+    {
+        if (m_playButtonIconUpdatePending)
+            return;
+
+        m_playButtonIconUpdatePending = true;
+        QTimer::singleShot(0, this, [this]() { updatePlayButtonIcons(); });
+    }
+
+    void RvBottomViewToolBar::updatePlayButtonIcons()
+    {
+        m_playButtonIconUpdatePending = false;
+
+        if (!m_session)
+            return;
+
+        const bool playing = m_session->isPlaying();
+        const bool backwardPause = playing && m_session->inc() < 0;
+        const bool forwardPause = playing && m_session->inc() > 0;
+
+        if (backwardPause != m_backwardShowsPause)
+        {
+            if (QToolButton* bb = dynamic_cast<QToolButton*>(widgetForAction(m_backwardPlayAction)))
+            {
+                bb->setIcon(QIcon(backwardPause ? ":/images/control_pause.png" : ":/images/control_bplay.png"));
+                m_backwardShowsPause = backwardPause;
+            }
+        }
+
+        if (forwardPause != m_forwardShowsPause)
+        {
+            if (QToolButton* bf = dynamic_cast<QToolButton*>(widgetForAction(m_forwardPlayAction)))
+            {
+                bf->setIcon(QIcon(forwardPause ? ":/images/control_pause.png" : ":/images/control_play.png"));
+                m_forwardShowsPause = forwardPause;
+            }
+        }
+    }
+
     EventNode::Result RvBottomViewToolBar::receiveEvent(const Event& event)
     {
         if (const GenericStringEvent* gevent = dynamic_cast<const GenericStringEvent*>(&event))
@@ -416,27 +455,9 @@ namespace Rv
                     }
                 }
             }
-            else if (name == "play-start")
+            else if (name == "play-start" || name == "play-stop")
             {
-                QToolButton* bb = dynamic_cast<QToolButton*>(widgetForAction(m_backwardPlayAction));
-                QToolButton* bf = dynamic_cast<QToolButton*>(widgetForAction(m_forwardPlayAction));
-
-                if (m_session->inc() == -1)
-                {
-                    bb->setIcon(QIcon(":/images/control_pause.png"));
-                }
-                else
-                {
-                    bf->setIcon(QIcon(":/images/control_pause.png"));
-                }
-            }
-            else if (name == "play-stop")
-            {
-                QToolButton* bb = dynamic_cast<QToolButton*>(widgetForAction(m_backwardPlayAction));
-                QToolButton* bf = dynamic_cast<QToolButton*>(widgetForAction(m_forwardPlayAction));
-
-                bb->setIcon(QIcon(":/images/control_bplay.png"));
-                bf->setIcon(QIcon(":/images/control_play.png"));
+                schedulePlayButtonIconUpdate();
             }
             else if (name == "play-mode-changed")
             {

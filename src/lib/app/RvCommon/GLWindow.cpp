@@ -20,6 +20,7 @@
 #include <RvApp/Options.h>
 #include <IPCore/Session.h>
 #include <IPCore/ImageRenderer.h>
+#include <IPCore/PlaybackTrace.h>
 #include <TwkApp/Event.h>
 #include <TwkApp/VideoDevice.h>
 #include <TwkGLF/GLVideoDevice.h>
@@ -69,6 +70,9 @@ namespace Rv
 
         GLFrameDiag s_glDiag;
         TwkUtil::Timer s_glDiagLoopTimer;
+
+        //  PlaybackTrace: end of the last paintGL(), closed by frameSwapped.
+        double s_tracePaintEnd = 0.0;
 
         //
         //  While a widget popup (e.g. the right-click menu) is open, hand it
@@ -143,6 +147,7 @@ namespace Rv
         , m_devicePixelRatio(static_cast<float>(devicePixelRatio()))
         , m_syncingDevicePixelRatio(false)
         , m_profilingSwapPending(false)
+        , m_syncSamplePending(false)
         , m_sharedContext(sharedContext)
     {
         setFormat(GLView::rvGLFormat(stereo, vsync, doubleBuffer, red, green, blue, alpha));
@@ -158,15 +163,37 @@ namespace Rv
         //  reports the new value.
         connect(this, &QWindow::screenChanged, this, [this](QScreen*) { syncDevicePixelRatio(); }, Qt::QueuedConnection);
 
-        connect(this, &QOpenGLWindow::frameSwapped, this, &GLWindow::endProfilingSwap);
+        connect(this, &QOpenGLWindow::frameSwapped, this, &GLWindow::onFrameSwapped);
     }
 
     GLWindow::~GLWindow() {}
 
     void GLWindow::stopProcessingEvents() { m_stopProcessingEvents = true; }
 
-    void GLWindow::endProfilingSwap()
+    void GLWindow::onFrameSwapped()
     {
+        //  The swap is the closest thing to the vsync the session can observe;
+        //  sampling before it (in paintGL) folds render time jitter into the
+        //  sync prediction used to pick the playback frame.
+        if (m_syncSamplePending)
+        {
+            m_syncSamplePending = false;
+
+            if (IPCore::Session* session = (m_doc != nullptr) ? m_doc->session() : nullptr)
+            {
+                session->addSyncSample();
+            }
+        }
+
+        //  QOpenGLWindow swaps after paintGL() returns, so the trace loop ends
+        //  here to include the swap (vsync wait) as presentMs.
+        if (s_tracePaintEnd > 0.0)
+        {
+            PlaybackTrace::current().presentMs += (PlaybackTrace::now() - s_tracePaintEnd) * 1000.0;
+            s_tracePaintEnd = 0.0;
+            PlaybackTrace::endLoop();
+        }
+
         if (!m_profilingSwapPending)
         {
             return;
@@ -358,6 +385,11 @@ namespace Rv
         IPCore::Session* session = m_doc->session();
         const bool debug = IPCore::debugProfile && session != nullptr;
 
+        if (session)
+        {
+            PlaybackTrace::beginLoop("gl");
+        }
+
         if (!m_postFirstNonEmptyRender && session && session->postFirstNonEmptyRender())
         {
             m_postFirstNonEmptyRender = true;
@@ -469,7 +501,10 @@ namespace Rv
                 diagPresentTimer.start();
             }
 
-            session->outputVideoDevice()->syncBuffers();
+            {
+                PlaybackTrace::Scope traceScope(PlaybackTrace::current().outputPresentMs);
+                session->outputVideoDevice()->syncBuffers();
+            }
 
             if (diagPresent)
             {
@@ -488,8 +523,17 @@ namespace Rv
             m_profilingSwapPending = true;
         }
 
-        session->addSyncSample();
-        session->postRender();
+        {
+            PlaybackTrace::Scope traceScope(PlaybackTrace::current().postRenderMs);
+            //  The sync sample is taken in onFrameSwapped().
+            m_syncSamplePending = true;
+            session->postRender();
+        }
+
+        if (PlaybackTrace::enabled())
+        {
+            s_tracePaintEnd = PlaybackTrace::now();
+        }
 
         //  No mainPresent term: QOpenGLWindow swaps after paintGL returns.
         if (IPCore::ImageRenderer::debugGpu())

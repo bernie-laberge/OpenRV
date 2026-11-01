@@ -14,6 +14,7 @@
 #include <RvApp/RvSession.h>
 #include <IPCore/Session.h>
 #include <IPCore/ImageRenderer.h>
+#include <IPCore/PlaybackTrace.h>
 #include <TwkApp/Event.h>
 #include <TwkApp/VideoDevice.h>
 
@@ -126,6 +127,10 @@ namespace Rv
         //  submit. A slot holds a value until its fence retires.
         std::optional<double> s_diagFrameEventTime;
         std::array<std::optional<double>, VulkanWindow::framesInFlight> s_diagSlotEventTime{};
+
+        //  PlaybackTrace sink for the passive output window, whose present
+        //  waits are reported as outputPresentMs instead.
+        double s_traceDiscardMs = 0.0;
 
         //  Adds the scope's duration in milliseconds to accumulatorMs when
         //  enabled.
@@ -2183,6 +2188,7 @@ namespace Rv
         VkResult fenceResult = VK_SUCCESS;
         {
             ScopedDiagTimer diagTimer(s_diag.fenceWaitMs, IPCore::ImageRenderer::debugGpu() && m_doc);
+            PlaybackTrace::Scope traceScope(m_doc ? PlaybackTrace::current().fenceWaitMs : s_traceDiscardMs);
             fenceResult = vkWaitForFences(m_vkDevice, 1, &m_frameSync[slot].fence, VK_TRUE, waitTimeout);
         }
 
@@ -2206,6 +2212,9 @@ namespace Rv
 
     std::optional<uint32_t> VulkanWindow::acquireFrameImage(uint32_t slot, uint64_t waitTimeout, bool drainShared)
     {
+        //  Includes the images-in-flight wait below.
+        PlaybackTrace::Scope traceScope(m_doc ? PlaybackTrace::current().acquireMs : s_traceDiscardMs);
+
         uint32_t imageIndex = 0;
         VkResult result = VK_SUCCESS;
         {
@@ -2554,6 +2563,8 @@ namespace Rv
             return;
         }
 
+        PlaybackTrace::beginLoop("vulkan");
+
         if (IPCore::ImageRenderer::debugGpu())
         {
             if (s_diagLoopTimer.isRunning())
@@ -2631,6 +2642,7 @@ namespace Rv
             const bool diagPresent = IPCore::ImageRenderer::debugGpu();
             {
                 ScopedDiagTimer diagTimer(s_diag.mainPresentMs, diagPresent);
+                PlaybackTrace::Scope traceScope(PlaybackTrace::current().presentMs);
                 m_videoDevice->syncBuffers();
             }
 
@@ -2638,6 +2650,7 @@ namespace Rv
             {
                 {
                     ScopedDiagTimer diagTimer(s_diag.outPresentMs, diagPresent);
+                    PlaybackTrace::Scope traceScope(PlaybackTrace::current().outputPresentMs);
                     session->outputVideoDevice()->syncBuffers();
                 }
 
@@ -2649,9 +2662,12 @@ namespace Rv
         if (session)
         {
             ScopedDiagTimer diagTimer(s_diag.postRenderMs, IPCore::ImageRenderer::debugGpu());
+            PlaybackTrace::Scope traceScope(PlaybackTrace::current().postRenderMs);
             session->addSyncSample();
             session->postRender();
         }
+
+        PlaybackTrace::endLoop();
 
         //  Averaged -debug gpu breakdown every 60 frames.
         if (IPCore::ImageRenderer::debugGpu() && m_doc)
