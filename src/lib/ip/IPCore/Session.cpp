@@ -323,20 +323,6 @@ namespace IPCore
     static bool RV_VSYNC_ADD_OFFSET = false;
     static bool RV_VSYNC_IGNORE_DEVICE = false;
 
-    //
-    //  Realtime cadence lock: when the media rate is within
-    //  RV_CADENCE_LOCK_TOLERANCE of the refresh rate (e.g. 59.94 fps on a
-    //  60Hz display) show exactly one new frame per refresh, and only repeat
-    //  or drop a frame once the playback clock is RV_CADENCE_LOCK_BAND frames
-    //  away from it. Plain rounding of the clock flips between repeat and
-    //  drop whenever the clock/refresh phase drifts near the half-frame
-    //  boundary, which turns a single drift correction into seconds of
-    //  stutter. RV_CADENCE_LOCK=0 disables it.
-    //
-    static bool RV_CADENCE_LOCK = true;
-    static float RV_CADENCE_LOCK_BAND = 0.9f;
-    static float RV_CADENCE_LOCK_TOLERANCE = 0.05f;
-
     Session::Session(IPGraph* graph)
         : TwkApp::Document()
         , m_waitForUploadThreadPrefetch(false)
@@ -471,18 +457,6 @@ namespace IPCore
             else
                 RV_VSYNC_IGNORE_DEVICE = false;
 
-            var = getenv("RV_CADENCE_LOCK");
-            if (var)
-                RV_CADENCE_LOCK = bool(atoi(var));
-
-            var = getenv("RV_CADENCE_LOCK_BAND");
-            if (var)
-                RV_CADENCE_LOCK_BAND = atof(var);
-
-            var = getenv("RV_CADENCE_LOCK_TOLERANCE");
-            if (var)
-                RV_CADENCE_LOCK_TOLERANCE = atof(var);
-
             if (debugPlayback)
             {
                 cerr << "INFO: RV_VSYNC_MAX_INTERVAL " << RV_VSYNC_MAX_INTERVAL << endl;
@@ -490,8 +464,6 @@ namespace IPCore
                 cerr << "INFO: RV_VSYNC_ADD_OFFSET " << RV_VSYNC_ADD_OFFSET << endl;
                 cerr << "INFO: RV_VSYNC_RATE_FORCE " << RV_VSYNC_RATE_FORCE << endl;
                 cerr << "INFO: RV_VSYNC_IGNORE_DEVICE " << RV_VSYNC_IGNORE_DEVICE << endl;
-                cerr << "INFO: RV_CADENCE_LOCK " << RV_CADENCE_LOCK << " band " << RV_CADENCE_LOCK_BAND << " tolerance "
-                     << RV_CADENCE_LOCK_TOLERANCE << endl;
             }
         }
 
@@ -632,11 +604,9 @@ namespace IPCore
             cerr << "INFO: RV_AVPLAYBACK_VERSION " << m_avPlaybackVersion << endl;
         }
 
-        if (const char* traceStr = getenv("RV_PLAYBACK_TRACE"))
-        {
-            if (!PlaybackTrace::enabled() && *traceStr && string(traceStr) != "0")
-                PlaybackTrace::setEnabled(true, traceStr);
-        }
+        //  Instrumented build: on unless RV_PLAYBACK_TRACE=0. RV's main()
+        //  normally enables it first; this covers the other entry points.
+        PlaybackTrace::initFromEnvironment();
 
         //
         // This env var is to enable/disable the closing of the audio when
@@ -1922,6 +1892,14 @@ namespace IPCore
             m_framePatternFailCount = 0;
         }
 
+        if (PlaybackTrace::enabled())
+        {
+            ostringstream o;
+            o << "play(" << eventData << ") frame=" << m_frame << " inc=" << inc() << " shift=" << m_shift << " playing=" << isPlaying()
+              << " buffering=" << isBuffering() << " fps=" << fps() << " realtime=" << realtime() << " audio=" << hasAudio();
+            PlaybackTrace::mark(o.str());
+        }
+
         if (m_avPlaybackVersion == 2)
         {
             return play_v2(eventData);
@@ -2125,6 +2103,19 @@ namespace IPCore
     {
         if (!isPlaying() && !isBuffering())
             return;
+
+        if (PlaybackTrace::enabled())
+        {
+            //  frame is the last frame chosen for display; elapsed is the
+            //  play clock at the stop, and clockFrame the frame it points to.
+            const double elapsedNow = m_timer.isRunning() ? elapsedPlaySeconds() : 0.0;
+            ostringstream o;
+            o << "stop(" << eventData << ") frame=" << m_frame << " lastRendered=" << m_lastFrame << " inc=" << inc()
+              << " shift=" << m_shift << " elapsed=" << elapsedNow
+              << " clockFrame=" << (m_timer.isRunning() ? targetFrame(elapsedNow) : m_frame) << " rendering=" << m_rendering
+              << " bufferWait=" << m_bufferWait;
+            PlaybackTrace::mark(o.str());
+        }
 
         m_timer.stop();
         m_stopTimer.start();
@@ -2350,6 +2341,13 @@ namespace IPCore
 
     void Session::setFrameInternal(int frame, string eventData)
     {
+        if (PlaybackTrace::enabled() && frame != m_frame)
+        {
+            ostringstream o;
+            o << "setFrame(" << eventData << ") " << m_frame << "->" << frame << " playing=" << isPlaying();
+            PlaybackTrace::mark(o.str());
+        }
+
         bool sendEvent = (frame != m_frame);
         m_frame = frame;
         if (sendEvent)
@@ -2745,32 +2743,6 @@ namespace IPCore
     //
     TwkMath::Time Session::predictedTimeUntilSync_v2() const
     {
-        const Time interval = refreshInterval_v2();
-
-        if (interval == 0.0)
-            return 0.0;
-
-        if (m_syncLastTime <= 0)
-            return interval;
-
-        //
-        //  If we know when the last sync time happened, use the current time to
-        //  predict the time until the next sync time.
-        //
-
-        Time t = interval - (m_timer.elapsed() - m_syncLastTime);
-
-        if (t > interval)
-            t = interval;
-
-        return t;
-    }
-
-    //
-    //  Refresh period used to predict sync times, or 0 if unknown.
-    //
-    TwkMath::Time Session::refreshInterval_v2() const
-    {
         float interval = 0.0;
 
         //
@@ -2795,6 +2767,7 @@ namespace IPCore
                 m_syncTargetRefresh = hz;
                 if (debugPlayback)
                     cerr << "INFO: new target refresh rate " << hz << endl;
+                PlaybackTrace::info("sync prediction uses the device refresh rate: " + to_string(hz) + " Hz");
             }
             interval = 1.0 / hz;
         }
@@ -2810,11 +2783,29 @@ namespace IPCore
                 m_syncTargetRefresh = hz;
                 if (debugPlayback)
                     cerr << "INFO: new computed target refresh rate " << hz << endl;
+                PlaybackTrace::info("sync prediction uses the measured refresh rate: " + to_string(hz) + " Hz");
             }
             interval = m_syncInterval;
         }
+        else
+        {
+            return 0.0;
+        }
 
-        return interval;
+        if (m_syncLastTime <= 0)
+            return interval;
+
+        //
+        //  If we know when the last sync time happened, use the current time to
+        //  predict the time until the next sync time.
+        //
+
+        Time t = interval - (m_timer.elapsed() - m_syncLastTime);
+
+        if (t > interval)
+            t = interval;
+
+        return t;
     }
 
     TwkMath::Time Session::predictedTimeUntilSync() const
@@ -3985,6 +3976,7 @@ namespace IPCore
             trace.inc = inc();
             trace.fps = fps();
             trace.deviceHz = m_outputVideoDevice ? m_outputVideoDevice->timing().hz : 0.0;
+            trace.syncIntervalMs = m_syncInterval * 1000.0;
             trace.prevFrame = m_frame;
             trace.targetFrame = m_frame;
             trace.shownFrame = m_frame;
@@ -4048,30 +4040,6 @@ namespace IPCore
                 if (RV_VSYNC_ADD_OFFSET && elapsedOffset == 0.0 && newFrame != m_frame)
                 {
                     elapsedOffset = float(newFrame - rangeStart() - m_shift) / fps() - elapsedPlaySeconds();
-                }
-
-                if (RV_CADENCE_LOCK && realtime() && !m_bufferWait && !outDeviceClock && newFrame != nextFrame)
-                {
-                    //
-                    //  See RV_CADENCE_LOCK. Only when there is about one
-                    //  frame per refresh; other ratios keep plain rounding.
-                    //
-
-                    const double interval = refreshInterval_v2();
-                    const double framesPerRefresh = interval * fps();
-
-                    if (interval > 0.0 && fabs(framesPerRefresh - 1.0) < RV_CADENCE_LOCK_TOLERANCE)
-                    {
-                        const double direction = inc() > 0 ? 1.0 : -1.0;
-                        const double exactFrame = direction * elapsed * fps() + m_shift + rangeStart();
-                        const double drift = (exactFrame - nextFrame) * direction;
-
-                        if (fabs(drift) < RV_CADENCE_LOCK_BAND)
-                        {
-                            newFrame = nextFrame;
-                            PlaybackTrace::current().cadenceLocked = true;
-                        }
-                    }
                 }
 
                 if (m_bufferWait || realtime())

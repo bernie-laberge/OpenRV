@@ -108,6 +108,7 @@
 #include <RvCommon/RvDocument.h>
 #include <IPCore/PlaybackTrace.h>
 #include <algorithm>
+#include <map>
 
 namespace
 {
@@ -186,6 +187,28 @@ namespace
                 std::replace(changeDescription.begin(), changeDescription.end(), ' ', '_');
             }
 
+            //  Input: pointer moves are counted; clicks and keys are markers,
+            //  so a stop can be told apart as play button vs. spacebar.
+            if (type == QEvent::MouseMove)
+                IPCore::PlaybackTrace::pointerMove();
+            else if (type == QEvent::MouseButtonPress || type == QEvent::MouseButtonRelease || type == QEvent::MouseButtonDblClick
+                     || type == QEvent::KeyPress || type == QEvent::KeyRelease)
+                markInput(receiver, e);
+
+            //  A repaint/flush of a top-level window other than the viewport
+            //  (the main window, a floating panel, a tooltip).
+            std::string flushDescription;
+            if (type == QEvent::UpdateRequest && receiver)
+            {
+                const bool widgetWindow = receiver->isWidgetType() && static_cast<QWidget*>(receiver)->isWindow();
+                if (widgetWindow || receiver->inherits("QWidgetWindow"))
+                {
+                    flushDescription = widgetPath(receiver);
+                    std::replace(flushDescription.begin(), flushDescription.end(), ' ', '_');
+                    noteSurfaceType(receiver, flushDescription);
+                }
+            }
+
             const double start = IPCore::PlaybackTrace::now();
             IPCore::PlaybackTrace::eventBegin(start, typeName);
 
@@ -199,6 +222,8 @@ namespace
 
             if (!changeDescription.empty())
                 IPCore::PlaybackTrace::widgetEvent(false, changeDescription, (IPCore::PlaybackTrace::now() - start) * 1000.0);
+            if (!flushDescription.empty())
+                IPCore::PlaybackTrace::mainWindowFlush(flushDescription, (IPCore::PlaybackTrace::now() - start) * 1000.0);
             return result;
         }
 
@@ -283,6 +308,83 @@ namespace
             return path;
         }
 
+        //  e.g. "MouseButtonPress left on QToolButton<-Rv::RvBottomViewToolBar"
+        //  or "KeyPress Space on Rv::GLWindow". Called before delivery.
+        static void markInput(QObject* receiver, QEvent* e)
+        {
+            const QEvent::Type type = e->type();
+            std::string what = eventTypeName(type);
+
+            if (type == QEvent::KeyPress || type == QEvent::KeyRelease)
+            {
+                const QKeyEvent* ke = static_cast<QKeyEvent*>(e);
+                if (ke->isAutoRepeat())
+                    return;
+                const QString key = QKeySequence(ke->key()).toString();
+                what += " " + (key.isEmpty() ? std::to_string(ke->key()) : key.toStdString());
+                what += " on " + widgetPath(receiver);
+            }
+            else
+            {
+                const QMouseEvent* me = static_cast<QMouseEvent*>(e);
+                const Qt::MouseButton button = me->button();
+                what += button == Qt::LeftButton     ? " left"
+                        : button == Qt::RightButton  ? " right"
+                        : button == Qt::MiddleButton ? " middle"
+                                                     : " other";
+
+                //  Top-level mouse events go to the window; name the widget
+                //  under the pointer instead.
+                const QWidget* under = QApplication::widgetAt(QCursor::pos());
+                what += " on " + widgetPath(under ? static_cast<const QObject*>(under) : receiver);
+            }
+
+            std::replace(what.begin(), what.end(), '\n', ' ');
+            IPCore::PlaybackTrace::mark(what);
+        }
+
+        //  Logs how each top-level window is composited (raster or OpenGL),
+        //  once per window and whenever it changes. An OpenGL-composited
+        //  main window swaps, and may wait for vsync, on every repaint.
+        static void noteSurfaceType(QObject* receiver, const std::string& description)
+        {
+            const QWindow* window = nullptr;
+            if (receiver->isWidgetType())
+                window = static_cast<QWidget*>(receiver)->windowHandle();
+            else
+                window = qobject_cast<QWindow*>(receiver);
+            if (!window)
+                return;
+
+            static std::map<const QWindow*, int> seen;
+            const int surfaceType = int(window->surfaceType());
+            auto it = seen.find(window);
+            if (it != seen.end() && it->second == surfaceType)
+                return;
+            seen[window] = surfaceType;
+
+            std::string name;
+            switch (window->surfaceType())
+            {
+            case QSurface::RasterSurface:
+                name = "RasterSurface";
+                break;
+            case QSurface::OpenGLSurface:
+                name = "OpenGLSurface";
+                break;
+            case QSurface::VulkanSurface:
+                name = "VulkanSurface";
+                break;
+            case QSurface::MetalSurface:
+                name = "MetalSurface";
+                break;
+            default:
+                name = std::to_string(surfaceType);
+                break;
+            }
+            IPCore::PlaybackTrace::info("top-level window " + description + " surface type " + name);
+        }
+
         static const char* eventTypeName(QEvent::Type type)
         {
             static const QMetaEnum e = QMetaEnum::fromType<QEvent::Type>();
@@ -292,6 +394,138 @@ namespace
 
         int m_depth = 0;
     };
+
+    //
+    //  Playback trace: one-time system information (RV, Qt, OS, remote
+    //  session, GPUs, screens, RV preferences), plus screen changes.
+    //
+
+    //  Values are truncated so a long list (paths, layouts) stays readable.
+    std::string traceVariantText(const QVariant& v)
+    {
+        constexpr int maxChars = 300;
+        QString s;
+        if (v.userType() == QMetaType::QStringList)
+            s = v.toStringList().join(",");
+        else if (v.canConvert<QString>())
+            s = v.toString();
+        else
+            s = QString("<") + v.typeName() + ">";
+        s.replace('\n', ' ');
+        if (s.size() > maxChars)
+            s = s.left(maxChars) + "...";
+        return s.toStdString();
+    }
+
+    std::string traceScreenText(const QScreen* screen)
+    {
+        std::ostringstream o;
+        const QRect g = screen->geometry();
+        o << "'" << screen->name().toStdString() << "' " << screen->manufacturer().toStdString() << " " << screen->model().toStdString()
+          << " geometry=" << g.width() << "x" << g.height() << "+" << g.x() << "+" << g.y() << " dpr=" << screen->devicePixelRatio()
+          << " refreshRate=" << screen->refreshRate() << "Hz depth=" << screen->depth()
+          << (screen == QGuiApplication::primaryScreen() ? " primary" : "");
+        return o.str();
+    }
+
+    void traceWatchScreen(QScreen* screen)
+    {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        QObject::connect(screen, &QScreen::refreshRateChanged,
+                         [screen](qreal) { IPCore::PlaybackTrace::info("screen refresh rate changed: " + traceScreenText(screen)); });
+#endif
+        QObject::connect(screen, &QScreen::geometryChanged,
+                         [screen](const QRect&) { IPCore::PlaybackTrace::info("screen geometry changed: " + traceScreenText(screen)); });
+    }
+
+    void traceStartupInfo()
+    {
+        using IPCore::PlaybackTrace;
+        if (!PlaybackTrace::enabled())
+            return;
+
+        {
+            std::ostringstream o;
+            o << "RV " << MAJOR_VERSION << "." << MINOR_VERSION << "." << REVISION_NUMBER << " (" << RELEASE_DESCRIPTION << ")"
+              << " HEAD=" << GIT_HEAD;
+            PlaybackTrace::info(o.str());
+        }
+
+        PlaybackTrace::info(std::string("Qt ") + qVersion() + ", platform " + QGuiApplication::platformName().toStdString());
+        PlaybackTrace::info("OS " + QSysInfo::prettyProductName().toStdString() + ", kernel " + QSysInfo::kernelVersion().toStdString()
+                            + ", " + QSysInfo::currentCpuArchitecture().toStdString() + ", " + std::to_string(QThread::idealThreadCount())
+                            + " threads");
+
+#ifdef PLATFORM_WINDOWS
+        PlaybackTrace::info(std::string("remote session (SM_REMOTESESSION): ") + (GetSystemMetrics(SM_REMOTESESSION) ? "yes" : "no"));
+
+        //  GPUs as Windows sees them. In a Remote Desktop session the
+        //  attached adapter is usually "Microsoft Remote Display Adapter".
+        for (DWORD i = 0;; ++i)
+        {
+            DISPLAY_DEVICEW device{};
+            device.cb = sizeof(device);
+            if (!EnumDisplayDevicesW(nullptr, i, &device, 0))
+                break;
+
+            std::ostringstream o;
+            o << "GPU adapter " << i << ": " << QString::fromWCharArray(device.DeviceString).toStdString() << " ["
+              << QString::fromWCharArray(device.DeviceID).toStdString() << "] " << QString::fromWCharArray(device.DeviceName).toStdString()
+              << ((device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) ? " attached" : "")
+              << ((device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE) ? " primary" : "");
+
+            DEVMODEW mode{};
+            mode.dmSize = sizeof(mode);
+            if (EnumDisplaySettingsW(device.DeviceName, ENUM_CURRENT_SETTINGS, &mode))
+                o << " mode=" << mode.dmPelsWidth << "x" << mode.dmPelsHeight << "@" << mode.dmDisplayFrequency << "Hz";
+
+            PlaybackTrace::info(o.str());
+        }
+#endif
+
+        for (QScreen* screen : QGuiApplication::screens())
+        {
+            PlaybackTrace::info("screen: " + traceScreenText(screen));
+            traceWatchScreen(screen);
+        }
+
+        QObject::connect(qApp, &QGuiApplication::screenAdded,
+                         [](QScreen* screen)
+                         {
+                             PlaybackTrace::info("screen added: " + traceScreenText(screen));
+                             traceWatchScreen(screen);
+                         });
+        QObject::connect(qApp, &QGuiApplication::screenRemoved,
+                         [](QScreen* screen) { PlaybackTrace::info("screen removed: '" + screen->name().toStdString() + "'"); });
+
+        //  RV preferences, read from the same file through a separate
+        //  read-only QSettings. Recent-file lists and anything that looks
+        //  like a credential are left out.
+        const QString prefsFile = Rv::RvSettings::globalSettings().fileName();
+        PlaybackTrace::info("preferences file: " + prefsFile.toStdString());
+        for (const char* name : {"RV_PREFS_OVERRIDE_PATH", "RV_PREFS_CLOBBER_PATH"})
+        {
+            if (const char* v = getenv(name))
+                PlaybackTrace::info(std::string("env ") + name + "=" + v);
+        }
+
+#ifdef PLATFORM_WINDOWS
+        QSettings prefs(prefsFile, QSettings::IniFormat);
+#else
+        QSettings prefs(prefsFile, QSettings::NativeFormat);
+#endif
+        const QStringList skipped = {"recent", "password", "token", "secret", "credential", "login", "cookie"};
+        int count = 0;
+        for (const QString& key : prefs.allKeys())
+        {
+            const QString lower = key.toLower();
+            if (std::any_of(skipped.begin(), skipped.end(), [&lower](const QString& word) { return lower.contains(word); }))
+                continue;
+            PlaybackTrace::info("pref " + key.toStdString() + "=" + traceVariantText(prefs.value(key)));
+            ++count;
+        }
+        PlaybackTrace::info("preferences: " + std::to_string(count) + " values logged");
+    }
 } // namespace
 
 // TODO_QT: Remove if everything works.
@@ -841,6 +1075,12 @@ int utf8Main(int argc, char* argv[])
     QApplication::addLibraryPath(dir.absolutePath());
 
     Rv::RvApplication* rvapp = new Rv::RvApplication(argc, argv);
+
+    //  Instrumented build: the playback trace is on unless
+    //  RV_PLAYBACK_TRACE=0. Enabled here, before any session exists, so the
+    //  log starts with the system information.
+    IPCore::PlaybackTrace::initFromEnvironment();
+    traceStartupInfo();
 
     rvapp->setExecutableNameCaps("RV");
 

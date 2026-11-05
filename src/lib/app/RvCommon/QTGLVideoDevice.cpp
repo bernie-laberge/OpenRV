@@ -16,6 +16,7 @@
 #include <RvCommon/DesktopVideoDevice.h>
 #include <TwkGLF/GLFBO.h>
 #include <IPCore/Session.h>
+#include <IPCore/PlaybackTrace.h>
 #include <TwkApp/Application.h>
 #include <TwkApp/VideoModule.h>
 
@@ -398,6 +399,9 @@ namespace Rv
 
                 if (IPCore::debugPlayback)
                     cout << "INFO: new desktop refresh rate " << m_refresh << endl;
+
+                IPCore::PlaybackTrace::info("viewport desktop device refresh rate: reported " + to_string(refresh) + " Hz, using "
+                                            + to_string(m_refresh) + " Hz, at " + to_string(x) + "," + to_string(y));
             }
         }
         m_x = x;

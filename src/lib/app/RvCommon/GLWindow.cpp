@@ -246,6 +246,31 @@ namespace Rv
 
             QSurfaceFormat f = context()->format();
 
+            if (PlaybackTrace::enabled())
+            {
+                //  The GPU the viewport renders with. "GDI Generic" or
+                //  "Microsoft Basic Render Driver" means software OpenGL
+                //  (e.g. a Remote Desktop session without GPU access).
+                const auto glText = [this](GLenum name)
+                {
+                    const GLubyte* s = glGetString(name);
+                    return s ? string(reinterpret_cast<const char*>(s)) : string("<unknown>");
+                };
+                PlaybackTrace::info("viewport GL vendor: " + glText(GL_VENDOR));
+                PlaybackTrace::info("viewport GL renderer: " + glText(GL_RENDERER));
+                PlaybackTrace::info("viewport GL version (includes the driver version): " + glText(GL_VERSION));
+
+                ostringstream o;
+                o << "viewport GL format: swapInterval=" << f.swapInterval() << " requestedSwapInterval=" << format().swapInterval()
+                  << " swapBehavior=" << int(f.swapBehavior()) << " (0 default, 1 single, 2 double, 3 triple) rgba=" << f.redBufferSize()
+                  << "," << f.greenBufferSize() << "," << f.blueBufferSize() << "," << f.alphaBufferSize()
+                  << " depth=" << f.depthBufferSize() << " stencil=" << f.stencilBufferSize() << " samples=" << f.samples()
+                  << " version=" << f.majorVersion() << "." << f.minorVersion() << " profile=" << int(f.profile());
+                if (QScreen* scr = screen())
+                    o << " screen='" << scr->name().toStdString() << "' refreshRate=" << scr->refreshRate() << "Hz";
+                PlaybackTrace::info(o.str());
+            }
+
             //  One-shot -debug gpu baseline: requested vs negotiated format, driver and display server.
             static bool baselineLogged = false;
             if (ImageRenderer::debugGpu() && !baselineLogged)

@@ -17,15 +17,26 @@ namespace IPCore
     //  of stutter / skipped frames. Unlike -debug gpu (60-frame averages)
     //  every render loop is recorded, so single-frame hitches are visible.
     //
-    //  Enable with either:
+    //  ON BY DEFAULT in this instrumented build. Controlled by
+    //  RV_PLAYBACK_TRACE:
     //
-    //      RV_PLAYBACK_TRACE=1                 (CSV in the temp directory)
-    //      RV_PLAYBACK_TRACE=C:/tmp/trace.csv  (CSV at the given path)
-    //      rv -debug playbacktrace             (CSV in the temp directory)
+    //      (unset) or 1                  trace to the default folder
+    //      0                             disabled
+    //      C:/some/folder                trace to that folder
+    //      C:/tmp/trace.csv              CSV at that path, log next to it
     //
-    //  While playing, one CSV row is written per render loop, anomalies are
-    //  printed to stdout as "PLAYBACK-TRACE:" lines, and a summary is printed
-    //  every few seconds and when playback stops.
+    //  Default folder: <Documents>/RV_playback_trace (falls back to the home
+    //  or temp directory). Each run writes two files with the same stem:
+    //
+    //      rv_trace_<date>_<time>.log    readable log: system info, markers
+    //                                    (input, play/stop, setFrame),
+    //                                    anomalies, summaries
+    //      rv_trace_<date>_<time>.csv    one row per render loop, playing
+    //                                    or not
+    //
+    //  Only the newest maxKeptRuns runs are kept in the default folder. The
+    //  CSV stops growing after RV_PLAYBACK_TRACE_MAX_MB (default 1024 MB);
+    //  the log continues.
     //
     //  All calls are made from the main (GUI) thread.
     //
@@ -56,6 +67,7 @@ namespace IPCore
             int inc = 1;
             double fps = 0.0;
             double deviceHz = 0.0;
+            double syncIntervalMs = 0.0;
 
             //  Frame decision
             double elapsed = 0.0;
@@ -64,7 +76,6 @@ namespace IPCore
             int targetFrame = 0;
             int shownFrame = 0;
             int skipped = 0;
-            bool cadenceLocked = false;
             int shiftBefore = 0;
             int shiftAfter = 0;
 
@@ -103,15 +114,53 @@ namespace IPCore
             int widgetPaintCount = 0;
             std::string widgetPaints;
             std::string widgetChanges;
+
+            //  Top-level (main window, panels, tooltips) repaint/flush
+            //  deliveries in the same window (see mainWindowFlush).
+            double mainFlushMs = 0.0;
+            double mainFlushMaxMs = 0.0;
+            int mainFlushCount = 0;
+
+            //  Pointer moves delivered in the same window (hover rate).
+            int pointerMoves = 0;
+
+            //  Markers (input, play/stop, setFrame) since the previous loop.
+            std::string markers;
         };
+
+        //  Runs kept in the default folder (older ones are deleted).
+        static constexpr int maxKeptRuns = 10;
 
         static bool enabled() { return m_enabled; }
 
+        //  Enables or disables the trace according to RV_PLAYBACK_TRACE (on
+        //  when unset). Does nothing if already enabled. Safe to call more
+        //  than once.
+        static void initFromEnvironment();
+
+        //  path: "" or "1" for the default folder, a folder, or a .csv path.
         static void setEnabled(bool b, const std::string& path = "");
+
+        static const std::string& logPath();
+        static const std::string& csvPath();
 
         static double now();
 
         static Record& current() { return m_current; }
+
+        //  A line of configuration / system information (printed and logged).
+        static void info(const std::string& line);
+
+        //  A timestamped marker: printed, logged and attached to the next
+        //  CSV row. Use for rare events (input, play/stop, setFrame).
+        static void mark(const std::string& what);
+
+        //  A pointer move was delivered (counted only).
+        static void pointerMove();
+
+        //  A top-level window repaint/flush (QEvent::UpdateRequest to a
+        //  window) took ms. description must not contain spaces.
+        static void mainWindowFlush(const std::string& description, double ms);
 
         //  Session::update(): QTimer heartbeat; redraw = a repaint was requested
         static void heartbeat(bool redraw);
