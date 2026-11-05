@@ -17,11 +17,10 @@ namespace IPCore
     //  of stutter / skipped frames. Unlike -debug gpu (60-frame averages)
     //  every render loop is recorded, so single-frame hitches are visible.
     //
-    //  ON BY DEFAULT in this instrumented build. Controlled by
-    //  RV_PLAYBACK_TRACE:
+    //  Off by default. Controlled by RV_PLAYBACK_TRACE:
     //
-    //      (unset) or 1                  trace to the default folder
-    //      0                             disabled
+    //      (unset) or 0                  disabled
+    //      1                             trace to the default folder
     //      C:/some/folder                trace to that folder
     //      C:/tmp/trace.csv              CSV at that path, log next to it
     //
@@ -133,8 +132,8 @@ namespace IPCore
 
         static bool enabled() { return m_enabled; }
 
-        //  Enables or disables the trace according to RV_PLAYBACK_TRACE (on
-        //  when unset). Does nothing if already enabled. Safe to call more
+        //  Enables or disables the trace according to RV_PLAYBACK_TRACE (off
+        //  when unset or 0). Does nothing if already enabled. Safe to call more
         //  than once.
         static void initFromEnvironment();
 

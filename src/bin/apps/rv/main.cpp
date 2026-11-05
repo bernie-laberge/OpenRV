@@ -1076,9 +1076,9 @@ int utf8Main(int argc, char* argv[])
 
     Rv::RvApplication* rvapp = new Rv::RvApplication(argc, argv);
 
-    //  Instrumented build: the playback trace is on unless
-    //  RV_PLAYBACK_TRACE=0. Enabled here, before any session exists, so the
-    //  log starts with the system information.
+    //  The playback trace is enabled by RV_PLAYBACK_TRACE. Enabled here,
+    //  before any session exists, so the log starts with the system
+    //  information.
     IPCore::PlaybackTrace::initFromEnvironment();
     traceStartupInfo();
 

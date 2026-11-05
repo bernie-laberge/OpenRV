@@ -404,12 +404,11 @@ namespace IPCore
             return;
         s.initialized = true;
 
+        //  Off by default. RV_PLAYBACK_TRACE=1 writes to the default
+        //  folder; a folder or .csv path writes there instead.
         const string value = envOrEmpty("RV_PLAYBACK_TRACE");
-        if (value == "0")
-        {
-            cout << "INFO: PlaybackTrace disabled (RV_PLAYBACK_TRACE=0)" << endl;
+        if (value.empty() || value == "0")
             return;
-        }
 
         setEnabled(true, value);
     }
@@ -484,7 +483,7 @@ namespace IPCore
         if (s.csv.is_open())
             writeHeader(s.csv);
 
-        cout << "INFO: PlaybackTrace enabled (set RV_PLAYBACK_TRACE=0 to disable)" << endl;
+        cout << "INFO: PlaybackTrace enabled (RV_PLAYBACK_TRACE)" << endl;
         if (!s.log.is_open())
             cout << "WARNING: PlaybackTrace: cannot open " << s.logPath << ", console only" << endl;
         if (!s.csv.is_open())

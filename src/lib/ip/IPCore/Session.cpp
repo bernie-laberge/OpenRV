@@ -604,7 +604,7 @@ namespace IPCore
             cerr << "INFO: RV_AVPLAYBACK_VERSION " << m_avPlaybackVersion << endl;
         }
 
-        //  Instrumented build: on unless RV_PLAYBACK_TRACE=0. RV's main()
+        //  Enabled by RV_PLAYBACK_TRACE (off by default). RV's main()
         //  normally enables it first; this covers the other entry points.
         PlaybackTrace::initFromEnvironment();
 
