@@ -1023,7 +1023,20 @@ namespace Rv
         str << g.width() << " x " << g.height();
         const float pa = 1.0;
         const float ps = 1.0;
-        const float rate = 60.0;
+
+        //  Use the screen's actual refresh rate: the session's vsync
+        //  prediction relies on it, and a fixed 60 Hz mistimes frame
+        //  selection on displays running at other rates (e.g. 30 Hz).
+        //  Fall back to 60 Hz if the platform doesn't report a rate.
+        float rate = 60.0f;
+        const QList<QScreen*> screens = QGuiApplication::screens();
+        if (m_screen >= 0 && m_screen < screens.size())
+        {
+            const qreal screenRate = screens[m_screen]->refreshRate();
+            if (screenRate > 1.0)
+                rate = float(screenRate);
+        }
+
         return VideoFormat(g.width(), g.height(), pa, ps, rate, str.str());
     }
 
